@@ -51,6 +51,6 @@ class Group():
                 raise Exception(f"{varname} in a Group should be a Dist or Timeseries, but is actually {type(dist)}")
 
         if len(kwargs) < 2:
-            raise Exception("Groups only make sense if they have two or more random variables, but this group only has {len(kwargs)} random variables")
+            raise Exception(f"Groups only make sense if they have two or more random variables, but this group only has {len(kwargs)} random variables")
 
         self.prog = {varname: dist.finalize(varname) for (varname, dist) in kwargs.items()}

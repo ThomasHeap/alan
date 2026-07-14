@@ -187,7 +187,7 @@ def moments2raw_moments(moments: list[tuple[str], Moment]):
         assert isinstance(varnames, tuple)
         assert isinstance(moment, Moment)
 
-        for raw_moment in moment.raw_moments():
+        for raw_moment in moment.all_raw_moments():
             raw_moments.append((varnames, raw_moment))
     return raw_moments
 

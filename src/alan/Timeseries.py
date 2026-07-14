@@ -7,13 +7,6 @@ from typing import Optional
 
 
 
-#Checks to Timeseries init.
-#if 0 == len(active_platedims):
-#    raise Exception(f"Timeseries can't be in the top-layer plate, as there's no platesize at the top")
-#if name not in self.trans.all_args:
-#    raise Exception(f"The timeseries transition distribution for {name} must have some dependence on the previous timestep; you get that by including {name} as an argument in the transition distribution.")
-
-
 class Timeseries(nn.Module):
     """
     In progress!!!!
@@ -94,7 +87,7 @@ class Timeseries(nn.Module):
         prev_state = scope[self.init]
         #Check that prev_state has the right dimensions
         if set(prev_state.dims) != set([K_dim, *other_platedims]):
-            raise Exception(f"Initial state, {self.init}, doesn't have the right dimensions for timeseries {name}; the initial state must be defined one step up in the plate heirarchy")
+            raise Exception(f"Initial state, {self.init}, doesn't have the right dimensions; the initial state must be defined one step up in the plate heirarchy")
 
         sample_timesteps = []
 
@@ -166,9 +159,6 @@ class Timeseries(nn.Module):
             prev_state = sample_timestep
             
         #stack old and new timesteps
-        # print(sample.order(original_T_dim))
-        # print(t.stack(extended_sample_timesteps, 0))
-        
         original_sample = sample.order(original_T_dim)
         original_sample_new_platedims = original_sample.order(*original_platedims)[active_extended_platedims]
         

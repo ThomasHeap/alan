@@ -19,7 +19,7 @@ def expand_named(x, names:list[str], all_platesizes:dict[str, int]):
     for name_x in names_x:
         if name_x not in all_platesizes:
             raise Exception(f"{name_x} is specified on a parameter, but is not given in all_platesizes")
-        if x.size(name_x) == all_platesizes[name_x]:
+        if x.size(name_x) != all_platesizes[name_x]:
             raise Exception(f"{name_x} is given as length {all_platesizes[name_x]} on all_platesizes, but there's a parameter where this dimension is size {x.size(name_x)}")
 
     for name in names:

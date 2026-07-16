@@ -29,6 +29,56 @@ gives that hyperprior a proper posterior instead of a point estimate.
 
 Not started — this branch just parks the plan.
 
+## Empirical findings since this doc was written, and what they change
+
+A separate empirical pass (`explore/mp-is-bias-empirical`, toy hierarchical Gaussian model,
+real alan `Problem`/`Sample` objects throughout) measured two things directly relevant to the
+Particle Gibbs design above: per-variable marginal ESS via `Marginals.ess()`, and a jackknife
+bias correction on the plain MP-IS estimator. Neither changes the PMMH plan; both bear on
+Particle Gibbs.
+
+- **ESS is a mixing-rate warning, not just a bias number.** Real `Marginals.ess()` values across
+  K=10..3000: `ESS(mu)` ≈ 0.60×K, stable across the whole range. `ESS(theta)` ≈ 0.48×K on
+  average, but with real ~4x spread *across the 6 plate replicates* (K=3000: min 503.85, mean
+  1442.33, max 1947.80 — i.e. worst-replicate ESS/K≈0.17 vs best≈0.65). Kish's ESS≤K is a hard
+  bound; the finding is that the efficiency ratio doesn't improve with K, and it's markedly
+  uneven across plate elements. In a conditional-SMC / Particle Gibbs loop this uneven weight
+  degeneracy is exactly the mechanism behind "reference trajectory stickiness" (the known
+  slow-mixing failure mode of plain Particle Gibbs): whichever plate replicate has the worst
+  ESS/K on a given step will tend to dominate how often the reference trajectory's ancestry gets
+  displaced, and the whole chain's mixing rate is bottlenecked by that worst replicate, not the
+  average one. This is a concrete, now-quantified reason to treat the "(Optional, better
+  mixing) Ancestor sampling (PGAS)" item below as a near-term priority rather than a nice-to-have
+  — plain Particle Gibbs on a model with this much cross-replicate ESS spread should be expected
+  to mix slowly.
+- **Order B (see `experiments/mp_is_bias/README.md` / the plate-reduction artifact) doesn't
+  require redesigning the conditional-sampling plan.** The independent per-replicate
+  marginalization that Order B established is a *description of how the existing forward pass
+  already reduces*, not a new constraint — the "pin a reference trajectory at a fixed particle
+  index (e.g. k=0) per latent" approach in the Particle-Gibbs checklist below is unaffected by
+  it either way.
+- **Jackknife is a narrow, cheap patch — not a substitute for Particle Gibbs.** Redone under the
+  corrected Order-B reduction (`jackknife_orderB.py`), the result is more nuanced than the
+  original (pre-fix) "none of it helps" finding: jackknifing `mu` (the flat, linearly-reduced
+  ratio) gives real bias reduction at small K (>10x at K=3), fading to a no-op by K≈30, because
+  it matches the classical delete-one SNIS-jackknife theory exactly. Jackknifing `theta` (reduced
+  via a per-plate-element `logsumexp`, not a flat ratio) never helps at any K tested — that
+  reduction shape falls outside what delete-one jackknife theory covers. Practically: jackknife
+  needs no new Markov-chain, burn-in, or conditional-resampling machinery, so it's worth keeping
+  as a cheap correction for outer/point-estimated quantities (the same structural category as a
+  PMMH-style outer θ). But it only ever patches a point estimate's bias for flat-ratio-reduced
+  variables — no exactness, no calibrated posterior uncertainty, and no help for plated/nested
+  latents. Particle Gibbs remains the tool for the actual problem (exact posteriors over nested,
+  plated latents); jackknife and Particle Gibbs are complementary, not competing, and jackknife
+  is not a reason to deprioritize this plan.
+- **BR-SNIS likely doesn't have the theta-vs-mu asymmetry above.** Its chain-recycling mechanism
+  (mixing-time-based i-SIR candidate pool recycling, not delete-one-and-extrapolate) doesn't need
+  to know which reduction shape/axis it's correcting, so it should apply uniformly across both
+  flat-ratio and nested-logsumexp reductions where jackknife only covers the former. This
+  reinforces treating BR-SNIS + Particle Gibbs (rather than jackknife + Particle Gibbs) as the
+  more general long-run combination, consistent with the roadmap artifact's existing "practical
+  read."
+
 ## Shared prerequisites (needed by both)
 
 - [ ] Expose `P_MP(z)`/its log as a standalone callable outside `_elbo`'s log-sum path, in a

@@ -82,18 +82,35 @@ matching HMC's own bias (+0.0018 over 20k samples). Global IS, at matched K, is 
 ~5-10x worse on both `mu` and the `theta` group across the whole sweep — matching both
 papers' headline result.
 
-**None of the three jackknife variants helped — but run against the wrong (Order-A)
-reduction (see "Resolved" above), so this needs to be redone against the corrected Order-B
-formula before it's a trustworthy statement about alan itself.** As originally run, all
-three left bias roughly unchanged and slightly *increased* RMSE, most visibly at small K.
-Working hypothesis, unchanged in spirit but not re-verified post-fix: the K&sup2;
-combinatorial grid isn't K&sup2; exchangeable i.i.d. terms — it's an outer-product-like
-construction from only 2K underlying draws (K mu-particles &times; K theta-particles), and
-the classical delete-one jackknife's bias-cancellation algebra assumes flat,
-roughly-exchangeable terms, which a rank-structured construction doesn't provide regardless
-of which axis gets deleted or which nominal `n` goes into the correction formula. Whether
-that story survives Order B (which itself adds another layer of per-plate-element
-structure) is now the open question.
+**Redone against the corrected Order-B reduction (`jackknife_orderB.py`), and the story is
+more interesting than "jackknife doesn't work here."** The two K-dims now play structurally
+different roles in the computation (see `alan-plate-reduction.html`, the companion
+explainer, for the full derivation): `mu` only ever enters a flat, linear ratio-of-sums at
+the root — exactly the classical self-normalized-IS shape the jackknife's bias-cancellation
+theory was derived for. `theta` enters through a `logsumexp` applied independently *per
+plate element*, a structurally different reduction. Rerunning the same delete-one jackknife
+against each:
+
+| K | plain bias | jack(mu) bias | jack(theta) bias |
+|---|---|---|---|
+| 3 | &minus;0.0468 | **&minus;0.0036** | &minus;0.0566 |
+| 10 | +0.0148 | **+0.0131** | +0.0211 |
+| 30 | +0.0071 | +0.0069 | +0.0142 |
+| 100 | +0.0239 | +0.0238 | +0.0246 |
+| 1000 | +0.0030 | +0.0030 | +0.0030 |
+
+Jackknifing `mu` shows a real effect exactly where SNIS bias theory predicts it should be
+largest: at K=3, bias drops more than 10&times; (&minus;0.047 &rarr; &minus;0.004), fading
+to a no-op by K&asymp;30 as the underlying bias becomes small relative to Monte Carlo noise
+(RMSE gets worse at K=3 specifically, the known variance-for-bias tradeoff of jackknife at
+very small sample counts). Jackknifing `theta` never helps, at any K — consistent with the
+classical jackknife's bias-cancellation algebra being derived for flat self-normalized
+ratios, which the per-element `logsumexp` reduction structurally isn't.
+
+Cross-validated two ways against real alan (`cross_check_orderB.py`): matching means and
+standard deviations across 300 independent draws at K=50 and K=200 (e.g. K=200: std 0.0446
+real alan vs. 0.0410 here — compare to the *unfixed* version's 4&times; mismatch), on top of
+the exact match already established in `diagnose_handroll_mismatch.py`.
 
 This is consistent with alan's *real*, verified marginal ESS (`marginal_ess.py`, straight
 from `Marginals.ess()`, not the hand-roll): `ESS(mu)` sits at a strikingly stable
@@ -107,19 +124,29 @@ grows, meaning the proposal/target mismatch this ratio reflects isn't getting re
 worse or better with more particles, just more finely resolved. See the artifact's ESS
 section for the fuller derivation.
 
-**Practical read:** don't invest in a naive jackknife adaptation of MP-IS without first
-deriving a version of the theory for this specific outer-product/tensor-contracted
-structure — it isn't a "just try it" fix, per what's tested here. BR-SNIS-style debiasing
-(mixing-time-based, not delete-one-and-extrapolate-based) remains the more promising
-direction, and is already scoped on `explore/particle-mcmc` (`docs/pmcmc_design.md`) since
-it needs the same Particle-Gibbs infrastructure.
+**Practical read:** a jackknife correction is worth applying specifically to whichever part
+of a moment estimate reduces via a flat, linear self-normalized ratio (like `mu`'s root-level
+reduction here) — and specifically *not* worth applying to parts that reduce via a nested
+per-element `logsumexp` (like `theta`'s plate-level reduction), where it doesn't help and
+can mildly hurt. That's a more actionable, structural distinction than "does jackknife work
+on MP-IS," and it only fell out once the Order-A/Order-B bug was fixed. BR-SNIS-style
+debiasing (mixing-time-based, not delete-one-and-extrapolate-based) remains the more
+promising direction for the reduction that doesn't jackknife well, and is already scoped on
+`explore/particle-mcmc` (`docs/pmcmc_design.md`) since it needs the same Particle-Gibbs
+infrastructure.
+
+For the full derivation of *why* Order B is the exact answer (not just the one that happens
+to match), with a from-scratch, hand-checkable K=2/2-plate-element worked example, see the
+companion piece: `alan-plate-reduction.html`.
 
 ## Reproducing
 
 ```
 cd experiments/mp_is_bias
 python3 sweep.py                        # MP-IS / Global-IS / HMC vs analytic truth
-python3 jackknife3.py                   # the (best-attempted) pairwise jackknife check
+python3 jackknife_orderB.py             # the corrected (Order-B) jackknife check
+python3 cross_check_orderB.py           # statistical validation of jackknife_orderB.py vs real alan
+python3 jackknife3.py                   # superseded: the original (Order-A, wrong) pairwise jackknife check
 python3 marginal_ess.py                 # real per-variable ESS from alan's Marginals.ess()
 python3 diagnose_handroll_mismatch.py   # reproduces the unresolved hand-roll discrepancy
 ```

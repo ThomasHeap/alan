@@ -1,0 +1,327 @@
+<title>How alan's plate reduction actually works</title>
+<meta name="description" content="Why a plate-shared K-dim isn't one shared particle in lockstep — a fully worked numeric example." />
+<style>
+  :root {
+    --bg: #faf8f4;
+    --surface: #ffffff;
+    --ink: #201e1a;
+    --ink-soft: #59544a;
+    --ink-faint: #8c8676;
+    --rule: #e4ded0;
+    --rule-strong: #cec5ac;
+    --accent: #8a5a0a;
+    --accent-ink: #ffffff;
+    --accent-soft: #f5ecd9;
+    --accent-soft-ink: #6b4708;
+    --code-bg: #f2ede1;
+    --code-ink: #3a3527;
+    --good: #2f6b4d;
+    --good-soft: #e7f2ec;
+    --bad: #9c3324;
+    --bad-soft: #f8e7e2;
+    --wrong-strike: #b23b2b;
+    --shadow: 0 1px 2px rgba(32,30,26,0.06), 0 8px 24px rgba(32,30,26,0.05);
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16151a; --surface: #1d1c21; --ink: #ece9e0; --ink-soft: #aaa596; --ink-faint: #726d5f;
+      --rule: #2d2b28; --rule-strong: #3d3a34; --accent: #e0ab52; --accent-ink: #1a1305;
+      --accent-soft: #2e2510; --accent-soft-ink: #f3ce93; --code-bg: #201e26; --code-ink: #ddd7c7;
+      --good: #74c39a; --good-soft: #1c2f26; --bad: #e28671; --bad-soft: #35201c;
+      --wrong-strike: #e28671;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 30px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16151a; --surface: #1d1c21; --ink: #ece9e0; --ink-soft: #aaa596; --ink-faint: #726d5f;
+    --rule: #2d2b28; --rule-strong: #3d3a34; --accent: #e0ab52; --accent-ink: #1a1305;
+    --accent-soft: #2e2510; --accent-soft-ink: #f3ce93; --code-bg: #201e26; --code-ink: #ddd7c7;
+    --good: #74c39a; --good-soft: #1c2f26; --bad: #e28671; --bad-soft: #35201c;
+    --wrong-strike: #e28671;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 30px rgba(0,0,0,0.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #faf8f4; --surface: #ffffff; --ink: #201e1a; --ink-soft: #59544a; --ink-faint: #8c8676;
+    --rule: #e4ded0; --rule-strong: #cec5ac; --accent: #8a5a0a; --accent-ink: #ffffff;
+    --accent-soft: #f5ecd9; --accent-soft-ink: #6b4708; --code-bg: #f2ede1; --code-ink: #3a3527;
+    --good: #2f6b4d; --good-soft: #e7f2ec; --bad: #9c3324; --bad-soft: #f8e7e2;
+    --wrong-strike: #b23b2b;
+    --shadow: 0 1px 2px rgba(32,30,26,0.06), 0 8px 24px rgba(32,30,26,0.05);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16.5px; line-height:1.62; -webkit-font-smoothing:antialiased; }
+  ::selection { background:var(--accent-soft); color:var(--accent-soft-ink); }
+  a { color: var(--accent); }
+  .page { max-width:900px; margin:0 auto; padding:0 24px 100px; }
+  header.masthead { padding:60px 0 26px; border-bottom:1px solid var(--rule); margin-bottom:34px; }
+  .eyebrow { font-family:var(--font-mono); font-size:12.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); margin:0 0 14px; }
+  h1.title { font-family:var(--font-display); font-weight:500; font-size:clamp(2rem,4vw,2.65rem); line-height:1.14; margin:0 0 14px; text-wrap:balance; letter-spacing:-.01em; }
+  .dek { font-size:1.06rem; color:var(--ink-soft); max-width:66ch; margin:0 0 4px; }
+  nav.toc { display:flex; flex-wrap:wrap; gap:6px 16px; margin:24px 0 0; padding:14px 18px; background:var(--surface); border:1px solid var(--rule); border-radius:10px; }
+  nav.toc a { text-decoration:none; color:var(--ink-soft); font-size:13.3px; font-family:var(--font-mono); white-space:nowrap; }
+  nav.toc a:hover { color:var(--accent); }
+  section { margin:54px 0; }
+  section > h2 { font-family:var(--font-display); font-size:1.5rem; font-weight:500; margin:0 0 6px; text-wrap:balance; scroll-margin-top:20px; }
+  section > .kicker { font-family:var(--font-mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 18px; }
+  h3 { font-family:var(--font-display); font-size:1.14rem; font-weight:600; margin:28px 0 10px; }
+  p { max-width:70ch; margin:0 0 14px; }
+  .wide { max-width:none; }
+  ul, ol { max-width:70ch; padding-left:22px; margin:0 0 16px; }
+  li { margin-bottom:7px; }
+  strong { font-weight:650; }
+  code, .ic { font-family:var(--font-mono); font-size:.86em; background:var(--code-bg); color:var(--code-ink); padding:.12em .4em; border-radius:4px; }
+  pre { background:var(--code-bg); color:var(--code-ink); padding:16px 18px; border-radius:10px; overflow-x:auto; font-family:var(--font-mono); font-size:13px; line-height:1.6; border:1px solid var(--rule); }
+  pre code { background:none; padding:0; }
+
+  .verdict { display:flex; align-items:baseline; gap:14px; padding:16px 20px; border-radius:12px; background:var(--surface); border:1px solid var(--rule-strong); margin:18px 0 26px; max-width:70ch; box-shadow:var(--shadow); }
+  .verdict .big { font-family:var(--font-display); font-size:1.4rem; color:var(--accent); flex-shrink:0; }
+  .verdict p { margin:0; }
+
+  .two-up { display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:820px; margin:18px 0 28px; }
+  @media (max-width:680px) { .two-up { grid-template-columns:1fr; } }
+  .order-card { border-radius:12px; padding:18px 20px; border:1px solid var(--rule-strong); background:var(--surface); box-shadow:var(--shadow); }
+  .order-card.wrong { border-color: color-mix(in srgb, var(--bad) 45%, var(--rule-strong)); }
+  .order-card.right { border-color: color-mix(in srgb, var(--good) 45%, var(--rule-strong)); }
+  .order-card .label { font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; font-weight:700; padding:3px 9px; border-radius:20px; display:inline-block; margin-bottom:10px; }
+  .order-card.wrong .label { background:var(--bad-soft); color:var(--bad); }
+  .order-card.right .label { background:var(--good-soft); color:var(--good); }
+  .order-card h4 { font-family:var(--font-display); font-size:1.05rem; margin:0 0 8px; font-weight:600; }
+  .order-card p { font-size:14.5px; margin:0 0 10px; }
+  .order-card .formula { text-align:center; margin:14px 0 4px; }
+
+  .tablewrap { overflow-x:auto; max-width:100%; }
+  table.data { width:100%; min-width:520px; border-collapse:collapse; font-size:14px; margin:14px 0 26px; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { text-align:left; padding:9px 13px; border-bottom:1px solid var(--rule); vertical-align:top; }
+  table.data thead th { font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); border-bottom:1px solid var(--rule-strong); }
+  table.data td.num, table.data th.num { text-align:right; font-family:var(--font-mono); font-size:13px; }
+  table.data tr.total td { font-weight:700; border-top:2px solid var(--rule-strong); }
+  table.data tr.total td.match { color: var(--good); }
+  table.data tr.total td.mismatch { color: var(--bad); }
+
+  .callout { display:flex; gap:12px; padding:14px 16px; border-radius:10px; margin:18px 0; max-width:70ch; font-size:15px; }
+  .callout .tag { font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; font-weight:700; flex-shrink:0; padding:3px 8px; border-radius:5px; height:fit-content; }
+  .callout p { margin:0; max-width:none; }
+  .callout p + p { margin-top:8px; }
+  .callout.good { background:var(--good-soft); border:1px solid color-mix(in srgb, var(--good) 30%, transparent); }
+  .callout.good .tag { background:var(--good); color:#fff; }
+  .callout.accent { background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .callout.accent .tag { background:var(--accent); color:var(--accent-ink); }
+
+  .stat-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; max-width:820px; margin:18px 0 24px; }
+  .stat { background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; }
+  .stat .k { font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); }
+  .stat .v { font-size:1.25rem; font-family:var(--font-display); margin-top:4px; color:var(--ink); font-variant-numeric: tabular-nums; }
+  .stat .sub { font-size:12.5px; color:var(--ink-soft); margin-top:2px; }
+
+  footer { margin-top:70px; padding-top:22px; border-top:1px solid var(--rule); font-family:var(--font-mono); font-size:12px; color:var(--ink-faint); }
+  a:focus-visible, nav.toc a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+  @media (prefers-reduced-motion:no-preference) { section { animation: rise 400ms ease-out both; } }
+  @keyframes rise { from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">A worked explainer &middot; for the alan / massively-parallel IS codebase</p>
+    <h1 class="title">A plate's shared K-dim isn't one shared particle &mdash; it's independent per-replicate marginalization, exact</h1>
+    <p class="dek">Two plate elements, two particles each, nine total additions and multiplications, checked
+      against a full brute-force enumeration. What that buys you scales to any plate size, at linear cost.</p>
+    <nav class="toc">
+      <a href="#question">The question</a>
+      <a href="#orders">Two candidate answers</a>
+      <a href="#example">Worked example</a>
+      <a href="#why">Why B is exact</a>
+      <a href="#code">Where it lives in the code</a>
+      <a href="#jackknife">What it changes about the jackknife</a>
+    </nav>
+  </header>
+
+  <section id="question">
+    <p class="kicker">The question</p>
+    <h2>When a plate's variable shares one K-dim, what does "shared" mean?</h2>
+    <p>Say <code>theta</code> lives inside a plate of size 2 (two observations, <code>theta_1</code> and
+      <code>theta_2</code>), each conditioned on a shared parent <code>mu</code>, and alan draws <code>K</code>
+      particles for <code>theta</code> &mdash; <em>one</em> K-dimension, not one per plate element. That's the
+      efficient part of the design: you don't pay for <code>K</code> per replicate. But it leaves a real
+      question open: when replicate 1 and replicate 2 each need "a theta value," do they have to agree on
+      <em>which</em> of the K particles they're using, or can each replicate pick independently?</p>
+    <p>I built a white-box reimplementation of this reduction to test something else entirely (a jackknife
+      bias correction) and got answers that didn't match alan's own output. Chasing that down landed here:
+      I'd silently assumed the first (shared, lockstep) answer. alan implements the second. They're not
+      approximations of each other &mdash; they're different sums, and only one of them is the exact answer
+      the papers' math actually specifies.</p>
+  </section>
+
+  <section id="orders">
+    <p class="kicker">Two candidate answers</p>
+    <h2>Lockstep vs. independent</h2>
+    <div class="two-up">
+      <div class="order-card wrong">
+        <span class="label">Wrong &mdash; what I assumed</span>
+        <h4>Order A &mdash; one shared index</h4>
+        <p>For a fixed particle <code>k</code>, <em>both</em> replicates use <code>theta_1[k]</code> and
+          <code>theta_2[k]</code> together, as a single two-element hypothesis. Sum each hypothesis's
+          log-density across the two replicates first, <em>then</em> normalize once over the <code>K</code>
+          shared hypotheses.</p>
+        <div class="formula"><code>logsumexp<sub>k</sub> [ &Sigma;<sub>i</sub> f<sub>i</sub>(k) ]</code></div>
+      </div>
+      <div class="order-card right">
+        <span class="label">Correct &mdash; what alan does</span>
+        <h4>Order B &mdash; independent per replicate</h4>
+        <p>Each replicate <em>independently</em> asks "which of the K particles best explains just me?"
+          &mdash; normalize (<code>logsumexp</code>) over <code>K</code> separately per replicate, <em>then</em>
+          sum those two already-reduced numbers across the plate.</p>
+        <div class="formula"><code>&Sigma;<sub>i</sub> logsumexp<sub>k</sub> [ f<sub>i</sub>(k) ]</code></div>
+      </div>
+    </div>
+    <p><code>logsumexp</code> doesn't distribute over an inner sum &mdash; <code>log&Sigma;exp(a+b) &ne;
+      log&Sigma;exp(a) + log&Sigma;exp(b)</code> in general &mdash; so these aren't two ways of writing the
+      same computation. They give different numbers. The next section shows exactly how different, and which
+      one is actually right.</p>
+  </section>
+
+  <section id="example">
+    <p class="kicker">Worked example</p>
+    <h2>K=2 particles, 2 plate elements, every term by hand</h2>
+    <p>Toy setup: <code>mu ~ N(0,1)</code>, <code>theta_i | mu ~ N(mu,1)</code> for <code>i=1,2</code>,
+      <code>x_i | theta_i ~ N(theta_i, 1)</code>, proposal <code>Q</code> factorised
+      (<code>N(0,1)</code> for everything). Fixed particle values and data, small enough to enumerate:</p>
+    <div class="stat-row">
+      <div class="stat"><div class="k">mu particles</div><div class="v">0.600, &minus;0.300</div></div>
+      <div class="stat"><div class="k">theta&#8321; particles</div><div class="v">0.800, &minus;0.500</div></div>
+      <div class="stat"><div class="k">theta&#8322; particles</div><div class="v">0.100, 0.900</div></div>
+      <div class="stat"><div class="k">data x&#8321;, x&#8322;</div><div class="v">0.700, 0.200</div></div>
+    </div>
+
+    <h3>Ground truth: enumerate all K&sup3;=8 combinations directly</h3>
+    <p>Since <code>mu</code>, <code>theta_1</code>, and <code>theta_2</code> are three separate latent
+      "nodes" in the graph (they're conditionally independent of each other given their parents), the
+      literal, no-shortcuts answer sums the importance weight over <em>every</em> combination of
+      <code>(k_mu, k_theta1, k_theta2)</code> &mdash; 2&times;2&times;2 = 8 terms, each one a full
+      unnormalized importance weight for one complete hypothesis:</p>
+    <pre><code>total = &Sigma;_{kmu,k1,k2}  p(mu[kmu]) &times; [p(theta1[k1]|mu[kmu])/q(theta1[k1])] &times; [p(theta2[k2]|mu[kmu])/q(theta2[k2])]
+                          &times; p(x1|theta1[k1]) &times; p(x2|theta2[k2])
+
+total = 4.594198</code></pre>
+
+    <h3>Order B, computed per plate element, matches exactly</h3>
+    <p>For each <code>k_mu</code>, reduce each replicate's own <code>K</code> particles independently, then
+      sum the two (already-reduced) results:</p>
+    <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>k_mu</th><th>element</th><th>per-particle log-terms (k=0, k=1)</th><th class="num">logsumexp</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="2">0 (mu=0.60)</td><td>theta&#8321;</td><td><code>0.2950, &minus;1.2000</code></td><td class="num">0.4973</td></tr>
+        <tr><td>theta&#8322;</td><td><code>&minus;0.1250, 0.1150</code></td><td class="num">0.6953</td></tr>
+        <tr><td rowspan="2">1 (mu=&minus;0.30)</td><td>theta&#8321;</td><td><code>&minus;0.2900, &minus;0.6150</code></td><td class="num">0.2538</td></tr>
+        <tr><td>theta&#8322;</td><td><code>&minus;0.0800, &minus;0.5600</code></td><td class="num">0.4017</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>Summing each <code>k_mu</code>'s two per-element results and exponentiating:
+      <code>k_mu=0 &rarr; exp(&minus;0.180 + 1.1927) = 2.7529</code>,
+      <code>k_mu=1 &rarr; exp(&minus;0.045 + 0.6555) = 1.8413</code>.</p>
+
+    <h3>The two candidate totals, side by side</h3>
+    <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>Method</th><th class="num">Total</th><th>vs. ground truth (4.594198)</th></tr></thead>
+      <tbody>
+        <tr><td>Brute-force, all K&sup3;=8 combinations</td><td class="num">4.594198</td><td>&mdash;</td></tr>
+        <tr class="total"><td>Order B (alan's actual reduction)</td><td class="num match">4.594198</td><td style="color:var(--good)">exact match</td></tr>
+        <tr class="total"><td>Order A (shared-index assumption)</td><td class="num mismatch">2.227860</td><td style="color:var(--bad)">51% low</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>Order A doesn't just round differently &mdash; it's missing more than half the true total. It only
+      ever considers the two "diagonal" hypotheses (both replicates using particle 0, or both using particle
+      1) and throws away the two "off-diagonal" ones (replicate 1 using particle 0 while replicate 2 uses
+      particle 1, and vice versa) &mdash; exactly the terms a shared, lockstep index can never reach.</p>
+  </section>
+
+  <section id="why">
+    <p class="kicker">Why B is exact, not just "a reasonable alternative"</p>
+    <h2>A sum over independent products factors into a product of sums</h2>
+    <p>This isn't a design choice with a tradeoff attached &mdash; Order B is the only one of the two that
+      computes the real answer, and it falls straight out of one algebra fact. Given <code>mu</code>, the
+      replicates are conditionally independent: <code>theta_1</code> and <code>theta_2</code> don't interact
+      except through their shared parent. So the joint importance weight for one full assignment
+      <code>(k_mu, k_1, k_2)</code> factors into a product of per-replicate terms, and summing a product of
+      independent terms over independent indices distributes:</p>
+    <pre><code>&Sigma;_{k1,k2}  f&#8321;(k1) &middot; f&#8322;(k2)   =   [ &Sigma;_k1 f&#8321;(k1) ]  &middot;  [ &Sigma;_k2 f&#8322;(k2) ]</code></pre>
+    <p>Take logs of both sides and the product of two independent sums becomes a <em>sum</em> of two
+      independent <code>logsumexp</code>s &mdash; exactly Order B. This is the same distributive-law trick
+      that makes the whole massively-parallel method tractable at the level of separate latent variables
+      (the K<sup>n</sup> &rarr; polynomial-time story); it turns out to apply <em>again</em>, one level down,
+      inside a single plate. A plate of size <code>P</code> effectively reasons over
+      <code>K<sup>P</sup></code> combinations of "who used which particle," computed exactly, in
+      <code>O(P&middot;K)</code> work &mdash; not because of an approximation, but because conditional
+      independence given the shared parent makes that factorization lossless.</p>
+    <div class="callout accent">
+      <span class="tag">Ties together</span>
+      <p>This is the same mechanism, one level more granular, as <code>Group.py</code>'s own documented
+        reason for grouping variables (turning K&sup3; into K&sup2; by sharing a K-dim across <em>correlated</em>
+        siblings) and as the general "why strict plate nesting" story for the whole library (each plate
+        boundary is exactly where a local, exact reduction over conditionally-independent structure happens).
+        Order A would have thrown away most of that power for any plate of size &gt; 1 &mdash; not a subtle
+        loss, a 51% one even at P=2.</p>
+    </div>
+  </section>
+
+  <section id="code">
+    <p class="kicker">Where this lives</p>
+    <h2>Two lines, `reduce_Ks` and `_logPQ_plate`</h2>
+    <p>The plate dimension stays a live, broadcast axis all the way through <code>reduce_Ks</code> &mdash;
+      confirmed directly: build a toy 2-element-plate &times; 3-particle tensor, hand it to
+      <code>reduce_Ks</code>, and the result still carries the plate dim. The actual summation across the
+      plate is a separate, later step:</p>
+    <pre><code># src/alan/logpq.py, _logPQ_plate
+lp = reduce_Ks(lps, all_Ks)      # reduces the K-dim; plate dim still live, broadcast
+...
+lp = lp.sum(new_platedim)        # THEN sums across the plate -- on already-log-reduced values</code></pre>
+    <p>That ordering &mdash; reduce the K-dim while the plate dim is still open, sum the plate dim only
+      afterward &mdash; is the entire mechanism. Nothing else needs to change per-plate; it's a structural
+      consequence of when in the recursion the plate dimension gets closed out.</p>
+  </section>
+
+  <section id="jackknife">
+    <p class="kicker">What changes downstream</p>
+    <h2>Redone against Order B, the jackknife finding gets more interesting, not less</h2>
+    <p>The original jackknife experiment (three delete-one variants, none helped) was run entirely against
+      the wrong reduction, so it's been rebuilt on Order B. The two K-dims now play structurally different
+      roles &mdash; <code>mu</code> only ever enters a flat, linear ratio-of-sums at the root (the classical
+      self-normalized-IS shape the jackknife theory was built for), while <code>theta</code> enters through a
+      per-plate-element <code>logsumexp</code>, a fundamentally different kind of reduction. That structural
+      difference shows up directly in the results:</p>
+    <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>K</th><th class="num">plain bias</th><th class="num">jack(mu) bias</th><th class="num">jack(theta) bias</th></tr></thead>
+      <tbody>
+        <tr><td>3</td><td class="num">&minus;0.0468</td><td class="num" style="color:var(--good)">&minus;0.0036</td><td class="num">&minus;0.0566</td></tr>
+        <tr><td>10</td><td class="num">+0.0148</td><td class="num" style="color:var(--good)">+0.0131</td><td class="num">+0.0211</td></tr>
+        <tr><td>30</td><td class="num">+0.0071</td><td class="num">+0.0069</td><td class="num">+0.0142</td></tr>
+        <tr><td>100</td><td class="num">+0.0239</td><td class="num">+0.0238</td><td class="num">+0.0246</td></tr>
+        <tr><td>1000</td><td class="num">+0.0030</td><td class="num">+0.0030</td><td class="num">+0.0030</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>Jackknifing <code>mu</code> (the flat, linear ratio) now shows a real effect, clearest exactly where
+      classical SNIS bias theory says it should show up most: at K=3, bias drops more than 10&times;
+      (&minus;0.047 &rarr; &minus;0.004), fading to a no-op by K&asymp;30 as the underlying bias itself
+      becomes small relative to Monte Carlo noise. Jackknifing <code>theta</code> (the per-element
+      <code>logsumexp</code>) never helps, at any K &mdash; consistent with the classical jackknife's
+      bias-cancellation algebra being derived for flat self-normalized ratios, which the inner reduction
+      simply isn't. Full sweep, both scripts, and the exact-match + statistical validation against real alan:
+      <code>jackknife_orderB.py</code> / <code>cross_check_orderB.py</code> on
+      <code>explore/mp-is-bias-empirical</code>.</p>
+  </section>
+
+  <footer>
+    Companion to <code>diagnose_handroll_mismatch.py</code> and the "Resolved" section of
+    <code>experiments/mp_is_bias/README.md</code> on <code>explore/mp-is-bias-empirical</code>.
+  </footer>
+
+</div>

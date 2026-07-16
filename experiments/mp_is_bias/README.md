@@ -35,36 +35,43 @@ x_i | theta_i ~ N(theta_i, 0.7)     (observed, fixed synthetic data)
 - `marginal_ess.py` — real per-variable marginal ESS from alan's own `Marginals.ess()`
   (not the hand-roll), replacing the ad hoc joint-grid ESS check the first pass used.
 
-## Correction: the hand-roll does not actually match alan
+## Resolved: the hand-roll implemented the wrong reduction order
 
-**The `sweep.py` headline numbers (MP-IS/Global-IS/HMC bias vs. K) are unaffected by this
-— they call `sample.moments()` on real alan `Sample` objects throughout, never the
-hand-roll.** But the jackknife experiments and the original ESS check were built entirely
-on the hand-rolled reimplementation in `jackknife.py`/`jackknife2.py`/`jackknife3.py`, and
-that reimplementation does **not** reproduce alan's own `Sample.moments()` output — even
-when fed alan's *exact* drawn particle values and alan's *exact* per-component log-probs
-(see `diagnose_handroll_mismatch.py`; e.g. one run gives `0.6386` by hand-rolled
-aggregation vs. `0.4371` from `sample.moments('mu', mean)`, from identical inputs).
+**The `sweep.py` headline numbers (MP-IS/Global-IS/HMC bias vs. K) were never affected by
+this** — they call `sample.moments()` on real alan `Sample` objects throughout, never the
+hand-roll. But the jackknife experiments and the original ESS check were built entirely on
+the hand-rolled reimplementation in `jackknife.py`/`jackknife2.py`/`jackknife3.py`, which
+turned out not to reproduce alan's own `Sample.moments()` output — confirmed to be a real
+discrepancy, localized precisely to the aggregation step, not any individual log p / log q
+term (each of those matched up to the expected dropped normalizing constant).
 
-This is **not** the seed-mismatch it first looked like. Matching seeds across two
-independent codebases was never a valid test in the first place — alan's `sample_gdt`
-(`dist.py`) draws an extra permutation via `Sampler.perm()` for *every* group on *every*
-call, regardless of whether that group has a parent to resample, and that draw is
-**provably unused** for a plain (non-`Timeseries`) `Dist` — `Dist.sample()` in `dist.py`
-takes a `timeseries_perm` argument and never references it. So the two implementations
-were always going to consume torch's RNG differently even under a shared seed; that part
-is expected and harmless. What *isn't* expected or harmless: feeding alan's own log-prob
-values for `mu`, `theta`, and `x` (verified component-by-component to match the hand-rolled
-formulas up to the correct dropped-normalizing-constant, i.e. individually correct) through
-the same ratio-of-sums aggregation the papers' Eq. 24/29 describe still doesn't reproduce
-`Sample.moments()`. The discrepancy is real and precisely localized to the aggregation
-step, not to any individual density term — root cause not yet found.
+**Root cause (see `diagnose_handroll_mismatch.py`): a wrong mental model of what "one
+K-dim shared across a plate" means, not a bug in alan.** I had assumed a plate-shared
+K-dim means every replicate uses the *same* particle index in lockstep — sum the six
+plate elements' log-densities first, *then* `logsumexp` once over the shared K-dim
+("Order A", what the hand-roll implemented). alan actually does something more powerful
+("Order B"): each plate element independently picks whichever of the K particles best
+explains *its own* observation, via a `logsumexp` **per plate element**, and only sums
+those already-reduced per-element values across the plate afterward. Concretely, in
+`reduce_Ks(lps, all_Ks)` (`src/alan/reduce_Ks.py`) the plate dimension is still a live,
+broadcast axis while the K-dim gets reduced — the actual plate sum
+(`lp.sum(new_platedim)` in `_logPQ_plate`, `src/alan/logpq.py`) happens *afterward*, on the
+already-`logsumexp`'d values. `logsumexp` does not distribute over an inner sum, so Order A
+and Order B are genuinely different computations, not two ways of writing the same one.
+This is a real extra bit of Rao-Blackwellization the plate structure buys you — worth
+noting elsewhere in this project's write-ups on how plates work.
 
-**Practical consequence:** the "none of the three jackknife variants helped" finding below
-is only established against the (now-suspect) hand-roll, not against alan's real
-computation — treat it as a lead, not a settled result, until this is resolved. The ESS
-numbers *have* been re-verified directly against alan's own `Marginals.ess()` (see
-`marginal_ess.py`) and are trustworthy as reported.
+Once corrected to Order B, both the ELBO (`log P_MP(z)`, matching `elbo_nograd()`) and the
+posterior mean of `mu` (via the identical source-term-trick autodiff alan uses internally)
+match alan **exactly**, to float32 precision (`-11.456429` / `-11.456429`, `0.437142` /
+`0.437142`).
+
+**Practical consequence:** the original "none of the three jackknife variants helped"
+finding was run against the Order-A (wrong) reduction, so it isn't validated for alan's
+actual computation — it would need to be redone against the corrected Order-B formula in
+`diagnose_handroll_mismatch.py` to know whether it holds. Not yet redone. The ESS numbers
+were pulled directly from alan's own `Marginals.ess()` throughout (never the hand-roll) and
+are unaffected.
 
 ## Results
 
@@ -75,14 +82,18 @@ matching HMC's own bias (+0.0018 over 20k samples). Global IS, at matched K, is 
 ~5-10x worse on both `mu` and the `theta` group across the whole sweep — matching both
 papers' headline result.
 
-**None of the three jackknife variants helped, on the hand-roll (see Correction above —
-this hasn't been confirmed against real alan yet).** All three left bias roughly unchanged
-and slightly *increased* RMSE, most visibly at small K. Working hypothesis: the K&sup2;
+**None of the three jackknife variants helped — but run against the wrong (Order-A)
+reduction (see "Resolved" above), so this needs to be redone against the corrected Order-B
+formula before it's a trustworthy statement about alan itself.** As originally run, all
+three left bias roughly unchanged and slightly *increased* RMSE, most visibly at small K.
+Working hypothesis, unchanged in spirit but not re-verified post-fix: the K&sup2;
 combinatorial grid isn't K&sup2; exchangeable i.i.d. terms — it's an outer-product-like
 construction from only 2K underlying draws (K mu-particles &times; K theta-particles), and
 the classical delete-one jackknife's bias-cancellation algebra assumes flat,
 roughly-exchangeable terms, which a rank-structured construction doesn't provide regardless
-of which axis gets deleted or which nominal `n` goes into the correction formula.
+of which axis gets deleted or which nominal `n` goes into the correction formula. Whether
+that story survives Order B (which itself adds another layer of per-plate-element
+structure) is now the open question.
 
 This is consistent with alan's *real*, verified marginal ESS (`marginal_ess.py`, straight
 from `Marginals.ess()`, not the hand-roll): `ESS(mu)` sits at a strikingly stable

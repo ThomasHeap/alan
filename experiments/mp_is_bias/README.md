@@ -139,6 +139,84 @@ For the full derivation of *why* Order B is the exact answer (not just the one t
 to match), with a from-scratch, hand-checkable K=2/2-plate-element worked example, see the
 companion piece: `alan-plate-reduction.html`.
 
+## BR-SNIS: chain-recycling debiasing via i-SIR
+
+Following on from "jackknife doesn't help `theta`" above, tried the more general debiasing
+approach: BR-SNIS (Cardoso et al. 2022) replaces a fixed-K self-normalized sample with an
+i-SIR (iterated sampling-importance-resampling) Markov chain — at each step the current state
+joins a fresh pool of K-1 proposal draws, and a new state is drawn from the pool proportional
+to importance weight. This is a standard, exact MCMC kernel for any pool size K &ge; 2, so the
+chain's *ergodic average* converges to the true posterior expectation as chain length T grows
+— bias is driven down by mixing (T), not by needing K &rarr; &infin; the way plain SNIS does.
+Implemented in `br_snis.py`, two variants:
+
+- **Full-joint i-SIR** (`isir_chain_full`) — an i-SIR chain over the whole `(mu, theta)`
+  vector at once, target = the model's exact unnormalized posterior (no inner Monte Carlo
+  noise, since nothing is plate-marginalized). This is the classical, textbook use of
+  BR-SNIS — it's the same flat problem Global-IS already is.
+- **Pseudo-marginal i-SIR on `mu` alone** (`isir_chain_mu`) — an i-SIR chain over `mu` only,
+  where each candidate's "likelihood" is alan's own noisy K_theta-particle `logsumexp`
+  estimate of `p(x|mu)` (mirrors `jackknife_orderB.compute_log_r_mu` exactly, not a
+  closed-form marginal). Requires standard pseudo-marginal MCMC discipline: once a candidate
+  is accepted, its noisy log-weight is *frozen* and reused, never refreshed — refreshing it
+  would break the chain's stationary distribution. This is the fair like-for-like test against
+  `jackknife_mu`, since it debiases the exact same quantity, via chain mixing instead of
+  delete-one extrapolation.
+
+No attempt was made to run i-SIR on `theta`'s K-dim in isolation — `theta_i`'s posterior only
+makes sense jointly with `mu` (it enters the model as `theta_i | mu`), so there's no flat,
+self-contained SNIS problem for `theta` alone the way there is for `mu`. The full-joint chain
+is the correct way to reach `theta`.
+
+**Results** (`br_snis_validate.py`, 40 repeats per cell):
+
+*Full-joint i-SIR vs. Global-IS vs. MP-IS, at matched total model-eval budget (K_pool &times;
+T):*
+
+| budget | i-SIR (full-joint) `mu` RMSE | Global-IS `mu` RMSE | MP-IS `mu` RMSE |
+|---|---|---|---|
+| 300 | 0.347 | 0.238 | 0.036 |
+| 1000 | 0.261 | 0.188 | 0.019 |
+| 3000 | 0.218 | 0.119 | 0.009 |
+
+The full-joint chain is asymptotically unbiased in T for any K, but at matched cost it's
+*worse* than even Global-IS, let alone MP-IS — it doesn't exploit the plate's conditional
+independence structure at all (every step reasons about the full 7-dimensional joint), so its
+per-evaluation efficiency is far below MP-IS's polynomial-in-K-but-structure-exploiting
+reduction. Same story for `theta`: at budget 1000, full-joint i-SIR RMSE 0.349 vs. MP-IS
+0.026 — roughly 13&times; worse. **BR-SNIS in its classical flat form does not compete with
+MP-IS's structural efficiency; it only becomes competitive once applied to a quantity that's
+already been plate-reduced.**
+
+*Pseudo-marginal i-SIR on `mu` (using alan's real K_theta=30 likelihood estimator) vs.
+`jackknife_mu`, both at the same outer pool size K and at a cost-matched jackknife K
+(K_pool&times;K_theta):*
+
+| i-SIR K_pool | jackknife K (same) RMSE | jackknife K (cost-matched) RMSE | i-SIR RMSE |
+|---|---|---|---|
+| 3 (K_theta=30, T=100) | 0.561 | 0.073 (K=90) | **0.081** |
+| 5 (K_theta=30, T=200) | 0.406 | 0.052 (K=150) | **0.046** |
+
+Two things stand out. First, jackknife at tiny K (3 or 5) has a large RMSE despite a modest
+bias — the known bias/variance tradeoff of delete-one jackknife on ratio estimators: the
+leave-one-out denominator can get close to zero when few samples dominate the weight,
+inflating variance sharply. The pseudo-marginal i-SIR chain doesn't have this failure mode,
+since it never divides by a leave-one-out sum. Second, once jackknife is given a fair,
+cost-matched K, the two methods land in the same ballpark (i-SIR modestly ahead at K_pool=5,
+roughly tied at K_pool=3) — i-SIR's real advantage is being usable *directly* at the tiny outer
+K alan's own K_mu would realistically have, where jackknife's variance blowup makes it
+unreliable.
+
+**Practical read:** classical (flat) BR-SNIS doesn't beat MP-IS's own structural efficiency —
+don't replace MP-IS's plate reduction with a general-purpose flat debiasing chain. Its real
+value is as a *pseudo-marginal* wrapper around the already-plate-reduced outer ratio (the same
+role jackknife_mu plays), where it's a safer choice than jackknife specifically because it
+doesn't inherit the ratio-estimator variance blowup at very small K, without giving up
+much/any accuracy at moderate K. Confirms the earlier prediction that BR-SNIS is
+reduction-shape-agnostic in spirit, but sharpens it: agnosticism doesn't buy a free efficiency
+win over MP-IS's own reduction — it has to be pointed at the same already-reduced quantity to
+be competitive at all.
+
 ## Reproducing
 
 ```
@@ -149,6 +227,8 @@ python3 cross_check_orderB.py           # statistical validation of jackknife_or
 python3 jackknife3.py                   # superseded: the original (Order-A, wrong) pairwise jackknife check
 python3 marginal_ess.py                 # real per-variable ESS from alan's Marginals.ess()
 python3 diagnose_handroll_mismatch.py   # reproduces the unresolved hand-roll discrepancy
+python3 br_snis.py                      # BR-SNIS (i-SIR chain) smoke test
+python3 br_snis_validate.py             # BR-SNIS vs Global-IS/MP-IS/jackknife sweep
 ```
 
 Needs `torch` (2.1-2.4ish — this repo needs `functorch.dim` *and* named-tensor APIs,

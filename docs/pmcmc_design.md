@@ -77,7 +77,36 @@ Particle Gibbs.
   flat-ratio and nested-logsumexp reductions where jackknife only covers the former. This
   reinforces treating BR-SNIS + Particle Gibbs (rather than jackknife + Particle Gibbs) as the
   more general long-run combination, consistent with the roadmap artifact's existing "practical
-  read."
+  read." **Update after prototyping (see below): this needed a correction.** A flat i-SIR chain
+  over the whole joint doesn't compete with MP-IS's own structural efficiency — it doesn't
+  exploit plate conditional independence at all, so at matched compute it loses badly to plain
+  MP-IS on both `mu` and `theta` (13x worse RMSE on `theta` at matched budget). BR-SNIS is
+  reduction-shape-agnostic in the sense that it needs no nested-logsumexp identity the way
+  jackknife did, but it still has to be pointed *at the already-plate-reduced quantity*
+  (pseudo-marginal-style, freezing the reference's noisy inner likelihood estimate between
+  steps) to be competitive at all — applied that way to `mu`, it matches or beats a cost-matched
+  jackknife and avoids jackknife's variance blowup at very small K. It was never tried directly
+  on `theta` in isolation, for the same reason jackknife couldn't be: `theta`'s marginal isn't a
+  self-contained flat SNIS problem without `mu`.
+
+## Prototypes (validate before investing in the real integration)
+
+Both pieces of this design doc now have a working, validated prototype — built against toy
+models with closed-form ground truth, not alan's own machinery, specifically to de-risk the
+more invasive `Plate.py`/`Sampler.py` integration work before committing to it:
+
+- **BR-SNIS**: `experiments/mp_is_bias/br_snis.py` + `br_snis_validate.py` (branch
+  `explore/mp-is-bias-empirical`). See that experiment's README for the full results table.
+- **Particle Gibbs / PGAS**: `experiments/particle_gibbs/` (this branch) — a full CSMC + PGAS
+  implementation on a toy linear-Gaussian state-space model (Kalman filter / RTS smoother
+  ground truth), since Particle Gibbs only means something on a genuinely sequential model,
+  which alan's own toy hierarchical model isn't. Result: PGAS gives a **74x** chain-ESS mixing
+  improvement over plain Particle Gibbs at K=10, and at K=5 plain PG's reference trajectory
+  **never moves at all** across 1800 iterations (chain ESS=1, not an artifact — confirmed on raw
+  samples) — the "reference stickiness" pathology predicted above, in its most acute form. This
+  is strong, concrete confirmation that PGAS should stay a near-term priority, not a
+  deprioritized "(Optional, better mixing)" item, once real integration work starts. See
+  `experiments/particle_gibbs/README.md` for the full results and reproduction steps.
 
 ## Shared prerequisites (needed by both)
 
@@ -127,11 +156,14 @@ Particle Gibbs.
       every resampling step unchanged. This is the standard "conditional SMC" construction —
       touches `Plate.py`'s recursive sampling and `Sampler.py` directly, more invasive than
       PMMH.
-- [ ] (Optional, better mixing) Ancestor sampling (PGAS, Lindsten et al.) — instead of always
-      keeping the reference's original lineage, resample which ancestor the reference is
-      attached to at each plate-tree level, reusing the existing backward/marginal machinery
-      (`logPQ_sample`, Algorithm 3) to get those ancestor weights. More work, avoids the slow
-      mixing plain particle Gibbs is known for on state-space/timeseries models.
+- [ ] Ancestor sampling (PGAS, Lindsten et al.) — instead of always keeping the reference's
+      original lineage, resample which ancestor the reference is attached to at each plate-tree
+      level, reusing the existing backward/marginal machinery (`logPQ_sample`, Algorithm 3) to
+      get those ancestor weights. More work than plain CSMC, but no longer "optional": the
+      toy-model prototype (`experiments/particle_gibbs/`) measured a 74x chain-ESS mixing
+      improvement over plain Particle Gibbs at K=10, and plain PG's reference trajectory frozen
+      solid (zero movement in 1800 iterations) at K=5 — do this alongside the base conditional-
+      sampling item, not as a later add-on.
 - [ ] After conditional resampling, draw the new reference trajectory by reusing
       `Sample.importance_sample()`/`_importance_sample_idxs()` (already samples from `P_z(k)`
       via the source-term trick) to pick a new k, then `index_into_sample(...)` to extract z^k.

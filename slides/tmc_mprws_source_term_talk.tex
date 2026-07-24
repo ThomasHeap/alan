@@ -15,7 +15,7 @@
 \setbeamercolor{alerted text}{fg=talkcoral}
 
 \title{TMC, MP-RWS, MPIW, the Source Term Trick, and QEM}
-\subtitle{How \texttt{alan} does inference --- plus a look at some newer empirical follow-ups}
+\subtitle{How \texttt{alan} does inference, plus a look at some newer empirical follow-ups}
 \author{}
 \date{}
 
@@ -36,12 +36,12 @@
     \item Standard importance sampling / VI: draw \emph{one} sample of the
       whole latent vector $z$ from $Q$, reweight by $p(z,x)/q(z)$.
     \item Better: draw $K$ \emph{whole-vector} samples (IWAE-style) and
-      average --- tighter bound, lower variance, but cost is $O(K)$ per
+      average: tighter bound, lower variance, but cost is $O(K)$ per
       \emph{full model}, and you need $K$ large before it helps on models
       with many latents.
     \item \alert{What if we could afford $K$ samples \emph{per latent
       variable}, not per whole vector?} Naively that's $K^{\#\text{latents}}$
-      combinations to consider --- looks hopeless.
+      combinations to consider: looks hopeless.
   \end{itemize}
   \vfill
   This is the problem Tensor Monte Carlo, then Massively-Parallel RWS, and
@@ -63,7 +63,9 @@
   \small\textbf{Reweighted Wake-Sleep (RWS)} improves the $Q$ update: instead
   of training $Q$ on $P$'s own samples, use self-normalized importance
   weights from $K$ samples of $Q$ to push $Q$ toward the \emph{true
-  posterior} directly.
+  posterior} directly. Unlike VI, RWS never reparameterizes: it works
+  directly with \alert{discrete latent variables}, no REINFORCE or
+  relaxations needed.
 \end{frame}
 
 % =============================================================
@@ -79,7 +81,7 @@
       model's dependency graph (plates, conditional independence).
     \item So the $K^{\#\text{latents}}$ sum factorizes into a sequence of
       small tensor contractions (like \texttt{einsum}) that follow the
-      graph structure --- cost becomes polynomial in $K$, not exponential.
+      graph structure: cost becomes polynomial in $K$, not exponential.
   \end{itemize}
 \end{frame}
 
@@ -128,16 +130,19 @@
     \end{column}
   \end{columns}
   \vfill
-  Cost per extra latent in the chain: $\times K$ (naive) vs.\ $+K^2$
-  (structured, following the graph one edge at a time) --- the gap widens
-  fast as the chain grows.
+  \small
+  \[
+    \hat P_{\text{MP}} = \sum_{k_a,k_b,k_c} f_A(k_a)\, f_{AB}(k_a,k_b)\, f_{BC}(k_b,k_c)
+    \;=\; \sum_{k_c} \Big[\underbrace{\textstyle\sum_{k_b}}_{\text{contract }B} v_B[k_b]\, f_{BC}(k_b,k_c)\Big]
+  \]
+  where $v_B[k_b] = \sum_{k_a} f_A(k_a)\, f_{AB}(k_a,k_b)$ is computed once and reused for every $k_c$.
 \end{frame}
 
-\begin{frame}{What TMC gives you --- and doesn't}
+\begin{frame}{What TMC gives you (and doesn't)}
   \begin{itemize}
     \item[\alert{+}] A much lower-variance, $K$-per-latent marginal
       likelihood estimator, at polynomial cost.
-    \item[\alert{--}] On its own, it's just an estimator --- no prescription
+    \item[\alert{--}] On its own, it's just an estimator: no prescription
       for \emph{training} $P$ and $Q$ together, and no cheap way to get
       posterior samples/moments back out afterward.
   \end{itemize}
@@ -159,32 +164,42 @@
   \]
   \begin{itemize}
     \item \alert{Unbiased}: $\mathbb{E}[\hat P_{\text{MP}}(x)] = p(x)$, the
-      true marginal likelihood --- proved directly, not just assumed.
+      true marginal likelihood, proved directly, not just assumed.
     \item This single fact is what later makes \emph{exact} MCMC schemes
-      (Particle MCMC) possible on top of this machinery --- more on that at
+      (Particle MCMC) possible on top of this machinery; more on that at
       the end.
   \end{itemize}
 \end{frame}
 
 \begin{frame}{Two updates, one estimator}
-  \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Wake phase (update $P$)}
-        Maximize $\log \hat P_{\text{MP}}(x)$ --- the massively-parallel
-        analogue of the IWAE bound (more on this next).
-      \end{block}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Sleep phase (update $Q$)}
-        Self-normalize the same per-latent importance weights, use them to
-        push $Q$ toward the true posterior --- the ``reweighted'' part of
-        RWS, now done per-latent instead of per-whole-vector.
-      \end{block}
-    \end{column}
-  \end{columns}
+  Practical form of the massively-parallel RWS updates (Heap et al., Eq.\ 19):
+  \[
+    \Delta\theta_{\text{MP}} = \mathbb{E}_{Q_{\text{MP}}(z|x)}\big[\nabla_\theta \log \hat P_{\text{MP}}(z)\big]
+    \qquad
+    \Delta\phi_{\text{MP}} = \mathbb{E}_{Q_{\text{MP}}(z|x)}\big[\nabla_\phi \big(-\log \hat P_{\text{MP}}(z)\big)\big]
+  \]
+  \begin{itemize}
+    \item \textbf{Wake phase}: ascend $\Delta\theta_{\text{MP}}$, i.e.\ climb
+      $\log \hat P_{\text{MP}}$ w.r.t.\ $P$'s parameters.
+    \item \textbf{Sleep phase}: ascend $\Delta\phi_{\text{MP}}$, i.e.\
+      \emph{descend} $\log \hat P_{\text{MP}}$ w.r.t.\ $Q$'s parameters, which
+      pushes $Q$ toward the true posterior.
+  \end{itemize}
   \vfill
-  Both updates reuse \emph{the same} $K$-particle contraction --- no
-  separate machinery for training $P$ vs. $Q$.
+  \small Equivalent to the fuller self-normalized-importance-weight form
+  (Eq.\ 18): a weighted average of $\nabla \log P_\theta(z^{\mathbf{k}},x)$ /
+  $\nabla \log Q_\phi(z^{\mathbf{k}},x)$ over all $K^n$ combinations, weighted
+  by $r_{\mathbf{k}}(z)/\hat P_{\text{MP}}(z)$. Both forms reuse the same
+  $\hat P_{\text{MP}}(z)$ computation; no separate machinery for $P$ vs.\ $Q$.
+\end{frame}
+
+\begin{frame}{Results: MP RWS vs.\ global RWS, MovieLens}
+  \begin{center}
+    \includegraphics[width=0.6\textwidth]{figures/mprws_movielens_results.png}
+  \end{center}
+  \small Predictive log-likelihood vs.\ $K \in \{3,10,30\}$, at three dataset
+  sizes. MP RWS (red) beats global RWS (blue) at every $K$ and every size,
+  and the gap widens as the number of users grows (Heap et al., 2023).
 \end{frame}
 
 % =============================================================
@@ -197,7 +212,7 @@
   \emph{posterior expectations} back out?
   \begin{itemize}
     \item \textbf{Global} importance weighting: draw $K$ whole-vector
-      samples, reweight, average --- the classical scheme.
+      samples, reweight, average: the classical scheme.
     \item \textbf{Massively-parallel} importance weighting (MPIW): draw $K$
       \emph{per latent}, reweight \emph{all} $K^{\#\text{latents}}$
       combinations (same trick as before), and use \emph{that} as the
@@ -205,8 +220,46 @@
   \end{itemize}
   \vfill
   \small This is the same $\hat P_{\text{MP}}(z)$ construction as before, now
-  reframed as a general-purpose importance-weighting tool in its own right
-  --- not just something living inside the RWS training loop.
+  reframed as a general-purpose importance-weighting tool in its own right,
+  not just something living inside the RWS training loop.
+\end{frame}
+
+\begin{frame}{The math}
+  With $\mathbf{k}=(k_1,\dots,k_n)$ indexing one combination of particles
+  (one per latent), and $\text{qa}(i)$ the parents of latent $i$ under $Q$:
+  \[
+    r_{\mathbf{k}}(z) = \frac{P(x,z^{\mathbf{k}})}{\prod_i Q_{\text{MP}}\big(z_i^{k_i} \mid z_j \text{ for } j\in\text{qa}(i)\big)}
+    \qquad
+    \hat P_{\text{MP}}(z) = \frac{1}{K^n}\sum_{\mathbf{k}\in\mathcal{K}^n} r_{\mathbf{k}}(z)
+  \]
+  and, for any moment function $m(\cdot)$, the posterior-expectation estimate:
+  \[
+    \hat m_{\text{MP}}(z) = \frac{1}{K^n}\sum_{\mathbf{k}\in\mathcal{K}^n} \frac{r_{\mathbf{k}}(z)}{\hat P_{\text{MP}}(z)}\, m(z^{\mathbf{k}})
+  \]
+  \vfill
+  \small $r_{\mathbf{k}}(z)$ factorizes into low-rank tensors along the graph
+  (as on the TMC slide), so both sums are computed via
+  \texttt{opt\_einsum}, never by looping over all $K^n$ terms directly.
+\end{frame}
+
+\begin{frame}[fragile]{The shape of an MPIW call}
+  \begin{center}
+  \begin{tikzpicture}[node distance=2mm,
+      box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
+    \node[box,fill=talkteal!10] (a) {z\_i: [K] for each latent i\ \ \ \ \ \ \ \# one axis per latent\\
+      r\_k = P(x, z\^{}k) / Q\_MP(z\^{}k)\ \ \ \ \# tensor, shape [K]*n\\
+      P\_MP = r\_k.mean(all k axes)\ \ \ \ \ \# scalar\\
+      m\_MP = ((r\_k / P\_MP) * m(z\^{}k)).mean(all k axes)};
+  \end{tikzpicture}
+  \end{center}
+  \vfill
+  \begin{itemize}
+    \item Input: $K$ particles per latent. Output: a scalar
+      ($\hat P_{\text{MP}}$) or a moment ($\hat m_{\text{MP}}$), never a
+      $K^n$-sized object materialized in memory.
+    \item Same shape whether you're computing the ELBO, an RWS update, or a
+      posterior moment; only $m(\cdot)$ changes.
+  \end{itemize}
 \end{frame}
 
 % =============================================================
@@ -243,17 +296,17 @@
   \vfill
   \small Exactly the same move as getting moments from
   $\partial \log Z[J] / \partial J$ for a log-partition function with an
-  external source $J$ --- a very old idea in statistical physics and
+  external source $J$: a very old idea in statistical physics and
   exponential families, applied here to a Monte Carlo estimator instead of
   an analytic one.
 \end{frame}
 
 \begin{frame}{Why this is the elegant part}
   \begin{itemize}
-    \item No new algorithm per quantity --- \texttt{alan} computes
+    \item No new algorithm per quantity: \texttt{alan} computes
       posterior samples, marginals, \emph{and} moments through literally the
       same code path that computes the bound.
-    \item Works uniformly across arbitrarily nested plates --- the
+    \item Works uniformly across arbitrarily nested plates: the
       contraction already handles that; the source term rides along for
       free.
     \item It's autodiff doing the bookkeeping that would otherwise be a
@@ -273,7 +326,7 @@
   \end{center}
   \vfill
   \begin{itemize}
-    \item \texttt{J\_tensor} starts at all zeros --- it doesn't change what
+    \item \texttt{J\_tensor} starts at all zeros: it doesn't change what
       \texttt{L} evaluates to.
     \item But differentiating \texttt{L} through it gives back exact
       per-particle marginal weights, for whichever latent(s) \texttt{J} was
@@ -292,7 +345,7 @@
     \item Needs a learning rate, tuned per model.
     \item \alert{Not invariant to reparameterization}: rescale a latent by a
       constant (leaving the actual distribution over data untouched) and
-      gradient descent's behaviour changes --- sometimes it stops converging
+      gradient descent's behaviour changes, and sometimes it stops converging
       at all.
   \end{itemize}
   \vfill
@@ -310,7 +363,7 @@
     \end{column}
     \begin{column}{0.48\textwidth}
       \begin{block}{M-step}
-        Set $Q$'s \emph{next} parameters directly from those moments ---
+        Set $Q$'s \emph{next} parameters directly from those moments, in
         closed form, for exponential-family $Q$ (Gaussian, Gamma, Beta,
         Dirichlet, Binomial, \dots).
       \end{block}
@@ -318,7 +371,7 @@
   \end{columns}
   \vfill
   \small The name: it resembles EM, but optimizes the parameters of the
-  \emph{approximate posterior} $Q$ --- not the model's prior/likelihood
+  \emph{approximate posterior} $Q$, not the model's prior/likelihood
   parameters $\theta$, as classical EM does. Hence ``QEM.''
 \end{frame}
 
@@ -335,7 +388,7 @@
   \end{center}
   \vfill
   \begin{itemize}
-    \item No gradients, no learning rate --- just moment matching.
+    \item No gradients, no learning rate: just moment matching.
     \item The exponential moving average on the last line matters: a single
       noisy moment estimate can otherwise cause pathological collapse
       (e.g.\ near-zero effective weight on all but one sample). Provably
@@ -343,19 +396,26 @@
   \end{itemize}
 \end{frame}
 
-\begin{frame}{Results, on five real hierarchical models}
+\begin{frame}{Results: five real hierarchical models, ELBO vs.\ time}
+  \begin{center}
+    \includegraphics[width=0.76\textwidth]{figures/qem_results_time.png}
+  \end{center}
+  \small QEM (pink) reaches the same ELBO / predictive log-likelihood as
+  MP-RWS (green) and MP-VI (orange) in a fraction of the wall-clock time, on
+  Bus Breakdown, MovieLens100K, Occupancy, Radon, and Covid (Heap, Bowyer \&
+  Aitchison, 2025). No backprop through the whole joint per step.
+\end{frame}
+
+\begin{frame}{Also: exactly reparameterization invariant}
   \begin{itemize}
-    \item \textbf{Faster}: fewer iterations \emph{and} less wall-clock time
-      than MP-VI and MP-RWS across Bus Breakdown, MovieLens100K, Occupancy,
-      Radon, and Covid --- no backprop through the whole joint per step.
     \item \textbf{At least as accurate}: posterior first-moment MSE (vs.\
       long HMC runs) at least as good as MP-RWS, and clearly better than
       MP-VI, throughout.
     \item \alert{Reparameterization invariant, exactly}: rescale a latent by
-      $\times 1/100$ (then back), QEM's trajectory is unchanged. MP-VI
+      $\times 1/100$ (then back), and QEM's trajectory is unchanged. MP-VI
       \emph{fails to converge at all within 250 iterations} on the
-      reparameterized Radon and Covid models --- a real, measured failure,
-      not a hypothetical one.
+      reparameterized Radon and Covid models: a real, measured failure, not
+      a hypothetical one.
   \end{itemize}
 \end{frame}
 
@@ -381,69 +441,25 @@
 \end{frame}
 
 % =============================================================
-\section{Newer empirical follow-ups}
+\section{Further work}
 % =============================================================
 
-\begin{frame}{What I've been doing on top of this}
-  \small
-  All still grounded in the same $\hat P_{\text{MP}}(z)$ estimator and the
-  source term trick above. Four quick results:
-  \begin{enumerate}
-    \item Does MP-IS actually beat plain self-normalized IS / catch up to
-      HMC in practice?
-    \item A bug hunt that uncovered a real fact about how \texttt{alan}'s
-      plate reduction works.
-    \item Where jackknife bias-correction does and doesn't help.
-    \item Two early prototypes: a general debiasing scheme (BR-SNIS), and
-      exact inference via Particle Gibbs --- both enabled directly by
-      $\hat P_{\text{MP}}(z)$'s unbiasedness.
-  \end{enumerate}
-\end{frame}
-
-\begin{frame}{1: MP-IS vs.\ Global-IS vs.\ HMC}
-  \begin{center}
-    \includegraphics[width=0.66\textwidth]{figures/bias_vs_K.pdf}
-  \end{center}
-  \small MP-IS's bias shrinks toward HMC's own (tiny) bias as $K$ grows;
-  Global-IS (whole-vector, no plate exploitation) is 5--10$\times$ worse at
-  matched $K$ throughout.
-\end{frame}
-
-\begin{frame}{2 \& 3: a bug hunt, and where jackknife helps}
+\begin{frame}{Further work: ideas building on $\hat P_{\text{MP}}$'s unbiasedness}
   \begin{itemize}
-    \item A hand-rolled reimplementation didn't match \texttt{alan}'s own
-      output --- traced to a genuine, previously undocumented fact: each
-      plate element reduces its own $K$ particles \emph{independently}
-      before summing across the plate (an extra Rao--Blackwellization the
-      plate structure buys for free).
-    \item Marginal ESS (via the source term trick's marginals) is bounded by
-      $K$ and uneven across plate replicates --- up to $4\times$ spread at
-      matched $K$.
-    \item Delete-one jackknife removes most of the small-$K$ bias for
-      variables that reduce via a flat ratio, but \alert{not} for variables
-      reduced through a nested per-plate-element step --- a precise,
-      structural distinction, not a coincidence.
+    \item \textbf{How biased is MP-IS in practice, and does it actually
+      close the gap to HMC?} An empirical open question worth measuring
+      directly on a model with a known answer.
+    \item \textbf{Better debiasing than jackknife}: chain-recycling schemes
+      (BR-SNIS-style) that target the already plate-reduced estimator
+      instead of the raw joint.
+    \item \textbf{Exact inference via Particle Gibbs}: $\hat P_{\text{MP}}$'s
+      unbiasedness is exactly the ingredient Particle MCMC needs; pin a
+      reference trajectory and get an exact posterior, not an approximate
+      one.
+    \item \textbf{Ancestor sampling (PGAS)} as the likely key to making
+      Particle Gibbs mix well, given the plate-wise ESS unevenness the
+      source term trick already lets us measure.
   \end{itemize}
-\end{frame}
-
-\begin{frame}{4: two prototypes enabled by $\hat P_{\text{MP}}$'s unbiasedness}
-  \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
-      \textbf{BR-SNIS} (chain-recycling debiasing): only competitive with
-      MP-IS's own efficiency once pointed \emph{at} the already
-      plate-reduced ratio --- a flat version loses badly.
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \textbf{Particle Gibbs / PGAS}: pins a reference trajectory using
-      $\hat P_{\text{MP}}$'s unbiasedness for exact posteriors. Ancestor
-      sampling (PGAS) gives a measured 74$\times$ mixing improvement over
-      plain Particle Gibbs at matched $K$.
-    \end{column}
-  \end{columns}
-  \vfill
-  \small Both are toy-model prototypes, not yet integrated into
-  \texttt{alan}'s core --- write-ups and numbers are in the design doc for
-  whoever picks this up next.
 \end{frame}
 
 % =============================================================
@@ -464,9 +480,9 @@
     \item QEM closes the loop: uses those moments as a gradient-free,
       reparameterization-invariant E-step, beating MP-VI and MP-RWS on both
       speed and (at worst) matching them on accuracy.
-    \item That whole stack is now being put to work: empirical bias checks,
-      a real reduction-order finding, and two exact/debiasing prototypes
-      building directly on $\hat P_{\text{MP}}$'s unbiasedness.
+    \item That whole stack opens up further work: measuring MP-IS bias in
+      practice, better debiasing, and exact inference via Particle Gibbs,
+      all building directly on $\hat P_{\text{MP}}$'s unbiasedness.
   \end{itemize}
 \end{frame}
 

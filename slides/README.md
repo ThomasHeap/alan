@@ -1,27 +1,33 @@
-# Presentation: bias, ESS, and debiasing in MP-IS
+# Presentation: TMC, MP-RWS, MP-IW, and the source term trick
 
-A ~30 minute Beamer talk covering the empirical MP-IS-vs-HMC bias
-investigation on `explore/mp-is-bias-empirical` (the Order-A/Order-B bug,
-ESS, jackknife), with the newer BR-SNIS and Particle Gibbs/PGAS prototypes
-from `explore/particle-mcmc` presented at the end as further work.
+A ~30 minute Beamer talk on how `alan` actually does inference: Tensor Monte
+Carlo (Aitchison 2019) as the precursor, Massively-Parallel Reweighted
+Wake-Sleep (Heap et al., UAI 2023) as the training algorithm built on top of
+it, the resulting MP-IW bound, and the source term trick (Bowyer, Heap &
+Aitchison, UAI 2024) for getting posterior samples/marginals/moments out of
+the same computation via autodiff. The empirical follow-up work (MP-IS-vs-HMC
+bias, the Order-A/Order-B bug, ESS, jackknife, and the BR-SNIS/Particle
+Gibbs prototypes) is condensed into four slides at the end, not the main
+content.
 
-- `mp_is_debiasing_talk.tex` — the talk (Beamer, `metropolis` theme).
-- `figures/` — plots generated from real experiment output (see below);
-  committed as PDFs so the talk builds without re-running any experiments.
-- `src/generate_figures.py` — regenerates `figures/*.pdf` from
-  `src/results.json` (copied from `explore/mp-is-bias-empirical`'s
-  `experiments/mp_is_bias/results.json`) plus numbers transcribed directly
-  from `marginal_ess.py`, `jackknife_orderB.py`, and
-  `experiments/particle_gibbs/pg_validate.py` output on the two experiment
-  branches (`explore/mp-is-bias-empirical`, `explore/particle-mcmc`) — no
-  fabricated numbers anywhere in the deck.
+- `tmc_mprws_source_term_talk.tex` — the talk (Beamer, `metropolis` theme).
+- `figures/bias_vs_K.pdf` — the one empirical plot used (from the
+  MP-IS-vs-HMC bias sweep); the other three plots from the earlier full
+  empirical deck aren't used here but are left in `figures/` in case a
+  longer version of the talk wants them back.
+- `src/generate_figures.py` / `src/results.json` — regenerates the figures
+  from real experiment output (see the file for provenance details). No
+  fabricated numbers anywhere in the deck; the algorithmic content (TMC /
+  MP-RWS / MP-IW / source term trick) is grounded directly in `alan`'s own
+  source (`src/alan/Sample.py`'s `J_tensor`/`grad()` mechanism for the
+  source term trick in particular) plus the two cited papers.
 
 ## Building
 
 ```
 cd slides
-pdflatex mp_is_debiasing_talk.tex
-pdflatex mp_is_debiasing_talk.tex   # second pass for the outline/ToC
+pdflatex tmc_mprws_source_term_talk.tex
+pdflatex tmc_mprws_source_term_talk.tex   # second pass for the outline/ToC
 ```
 
 Needs a TeX distribution with the `beamer`, `metropolis` theme, and `tikz`

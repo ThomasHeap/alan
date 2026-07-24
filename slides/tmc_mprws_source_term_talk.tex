@@ -15,7 +15,6 @@
 \setbeamercolor{alerted text}{fg=talkcoral}
 
 \title{TMC, MP-RWS, MPIW, the Source Term Trick, and QEM}
-\subtitle{How \texttt{alan} does inference, plus a look at some newer empirical follow-ups}
 \author{}
 \date{}
 
@@ -219,6 +218,17 @@
   (as on the TMC slide), so this sum is computed via \texttt{opt\_einsum},
   never by looping over all $K^n$ terms directly, giving one scalar,
   $\hat P_{\text{MP}}(z)$, per forward pass.
+\end{frame}
+
+\begin{frame}{Results: MPIW vs.\ global importance weighting}
+  \begin{center}
+    \includegraphics[width=0.76\textwidth]{figures/mpiw_results.png}
+  \end{center}
+  \small MPIW (red) reaches a tighter ELBO and higher predictive
+  log-likelihood at $K$ in the tens than global IS (blue) reaches at $K$ up
+  to $10^6$, across four real datasets (Bowyer, Heap \& Aitchison, UAI
+  2024). On MovieLens, global IS's predictive log-likelihood barely moves
+  at all across seven orders of magnitude of $K$.
 \end{frame}
 
 % =============================================================

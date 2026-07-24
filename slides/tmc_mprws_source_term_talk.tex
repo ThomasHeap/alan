@@ -85,57 +85,39 @@
   \end{itemize}
 \end{frame}
 
-\begin{frame}{Why this matters: a 3-latent chain, $K=3$}
-  \begin{columns}[T]
-    \begin{column}{0.46\textwidth}
-      \centering
-      {\small naive: all $K^3=27$ combinations}\\[3mm]
-      \begin{tikzpicture}[scale=0.62,
-          cell/.style={draw,minimum size=6mm,fill=talkcoral!22}]
-        \foreach \s in {0,1,2}{
-          \begin{scope}[shift={(\s*0.55,\s*0.55)}]
-            \foreach \i in {0,1,2}{
-              \foreach \j in {0,1,2}{
-                \node[cell] at (\i*0.62,\j*0.62) {};
-              }
-            }
-          \end{scope}
-        }
-        \node[font=\scriptsize] at (2.7,-1.1) {$K$ slices of $K\times K$};
-      \end{tikzpicture}
-    \end{column}
-    \begin{column}{0.5\textwidth}
-      \centering
-      {\small structured: contract one edge at a time}\\[3mm]
-      \begin{tikzpicture}[scale=0.62,
-          node distance=10mm and 12mm,
-          lat/.style={circle,draw,minimum size=7mm,font=\scriptsize},
-          vec/.style={draw,minimum width=6mm,minimum height=14mm,fill=talkteal!25},
-          lbl/.style={font=\scriptsize}]
-        \node[lat] (a) {A};
-        \node[lat,right=of a] (b) {B};
-        \node[lat,right=of b] (c) {C};
-        \draw[-{Latex[length=1.8mm]}] (a) -- (b);
-        \draw[-{Latex[length=1.8mm]}] (b) -- (c);
-        \node[vec,below=14mm of a] (va) {};
-        \node[vec,below=14mm of b] (vb) {};
-        \node[vec,below=14mm of c] (vc) {};
-        \node[lbl,below=1mm of va] {$K$};
-        \node[lbl,below=1mm of vb] {$K$};
-        \node[lbl,below=1mm of vc] {$K$};
-        \draw[-{Latex[length=1.8mm]}] (va) -- node[above=1mm,lbl]{$K{\times}K$} (vb);
-        \draw[-{Latex[length=1.8mm]}] (vb) -- node[above=1mm,lbl]{$K{\times}K$} (vc);
-      \end{tikzpicture}\\[3mm]
-      {\scriptsize $2K^2 = 18$ multiply-adds, not $27$}
-    \end{column}
-  \end{columns}
-  \vfill
+\begin{frame}{Why this matters: a 4-latent chain, $K=3$}
+  \begin{center}
+  \begin{tikzpicture}[scale=0.62,
+      node distance=16mm,
+      lat/.style={circle,draw,minimum size=7mm,font=\scriptsize}]
+    \node[lat] (a) {A};
+    \node[lat,right=of a] (b) {B};
+    \node[lat,right=of b] (c) {C};
+    \node[lat,right=of c] (d) {D};
+    \draw[-{Latex[length=1.8mm]}] (a) -- (b);
+    \draw[-{Latex[length=1.8mm]}] (b) -- (c);
+    \draw[-{Latex[length=1.8mm]}] (c) -- (d);
+  \end{tikzpicture}
+  \end{center}
   \small
+  Each factor only touches its neighbour, so the sum \alert{distributes}: pull
+  each inner sum out past every factor that doesn't depend on it, one latent
+  at a time.
   \[
-    \hat P_{\text{MP}} = \sum_{k_a,k_b,k_c} f_A(k_a)\, f_{AB}(k_a,k_b)\, f_{BC}(k_b,k_c)
-    \;=\; \sum_{k_c} \Big[\underbrace{\textstyle\sum_{k_b}}_{\text{contract }B} v_B[k_b]\, f_{BC}(k_b,k_c)\Big]
+    \hat P_{\text{MP}} = \sum_{k_a,k_b,k_c,k_d} f_A(k_a)\, f_{AB}(k_a,k_b)\, f_{BC}(k_b,k_c)\, f_{CD}(k_c,k_d)
   \]
-  where $v_B[k_b] = \sum_{k_a} f_A(k_a)\, f_{AB}(k_a,k_b)$ is computed once and reused for every $k_c$.
+  \vspace{-2mm}
+  \begin{align*}
+    &= \sum_{k_b,k_c,k_d} v_B[k_b]\, f_{BC}(k_b,k_c)\, f_{CD}(k_c,k_d),
+      &&v_B[k_b] = \sum_{k_a} f_A(k_a)\, f_{AB}(k_a,k_b) \\
+    &= \sum_{k_c,k_d} v_C[k_c]\, f_{CD}(k_c,k_d),
+      &&v_C[k_c] = \sum_{k_b} v_B[k_b]\, f_{BC}(k_b,k_c) \\
+    &= \sum_{k_d} v_D[k_d],
+      &&v_D[k_d] = \sum_{k_c} v_C[k_c]\, f_{CD}(k_c,k_d)
+  \end{align*}
+  \vspace{-2mm}
+  \small three $K{\times}K$ contractions, $3K^2 = 27$ multiply-adds, not
+  $K^4 = 81$: the saving grows with every extra latent in the chain.
 \end{frame}
 
 \begin{frame}{What TMC gives you (and doesn't)}
@@ -295,43 +277,26 @@
   \end{itemize}
 \end{frame}
 
-\begin{frame}[fragile]{The shape of a source-term-trick call}
-  \begin{center}
-  \begin{tikzpicture}[node distance=2mm,
-      box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
-    \node[box,fill=talkteal!10] (a) {J: zeros, same shape as z\_i (one entry per particle)\\
-      L\_of\_J = log P\_MP\_exp(z, J)\ \ \ \ \ \ \ \ \# scalar, same forward pass as before\\
-      m\_MP = grad(L\_of\_J, J)\ \ \ \ \ \ \ \ \ \ \ \ \ \# same shape as J};
-  \end{tikzpicture}
-  \end{center}
-  \vfill
-  \begin{itemize}
-    \item Input: a zero tensor $J$ shaped like whichever latent's particles
-      you want a quantity for. Output: a tensor the \emph{same shape},
-      holding one number per particle.
-    \item One \texttt{grad} call replaces a bespoke backward traversal;
-      samples, marginals, and moments all use this exact shape, only
-      $m(\cdot)$ (baked into $L(J)$) changes.
-  \end{itemize}
-\end{frame}
-
 \begin{frame}[fragile]{This is really in the code}
   From \texttt{alan}'s \texttt{Sample.py} (lightly trimmed):
   \begin{center}
   \begin{tikzpicture}[node distance=3mm,
       box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
-    \node[box,fill=talkteal!10] (a) {J\_tensor = zeros(shape, requires\_grad=True)\\
-      L = self.\_elbo(sample, extra\_log\_factors=\{...: J\_tensor\})\\
-      marginals = grad(L, J\_tensor\_list)};
+    \node[box,fill=talkteal!10] (a) {dims = [*Kdims, *active\_platedims]\ \ \ \# same dims as the target latent(s)\\
+      J\_tensor = zeros([d.size for d in dims], requires\_grad=True)\\
+      L = self.\_elbo(sample, extra\_log\_factors=\{target: J\_tensor[dims]\})\\
+      result = grad(L, J\_tensor)\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \# same shape as J\_tensor};
   \end{tikzpicture}
   \end{center}
   \vfill
   \begin{itemize}
     \item \texttt{J\_tensor} starts at all zeros: it doesn't change what
-      \texttt{L} evaluates to.
-    \item But differentiating \texttt{L} through it gives back exact
-      per-particle marginal weights, for whichever latent(s) \texttt{J} was
-      attached to.
+      \texttt{L} evaluates to, but it has to carry the \emph{same} K-dim(s)
+      (and plate dims) as whatever you're differentiating for, so the
+      gradient comes back the same shape: one number per particle.
+    \item One \texttt{grad} call replaces a bespoke backward traversal;
+      samples, marginals, and moments all use this exact shape, only which
+      dims \texttt{J} carries and what's baked into $L$ changes.
   \end{itemize}
 \end{frame}
 
@@ -442,28 +407,6 @@
 \end{frame}
 
 % =============================================================
-\section{Further work}
-% =============================================================
-
-\begin{frame}{Further work: ideas building on $\hat P_{\text{MP}}$'s unbiasedness}
-  \begin{itemize}
-    \item \textbf{How biased is MP-IS in practice, and does it actually
-      close the gap to HMC?} An empirical open question worth measuring
-      directly on a model with a known answer.
-    \item \textbf{Better debiasing than jackknife}: chain-recycling schemes
-      (BR-SNIS-style) that target the already plate-reduced estimator
-      instead of the raw joint.
-    \item \textbf{Exact inference via Particle Gibbs}: $\hat P_{\text{MP}}$'s
-      unbiasedness is exactly the ingredient Particle MCMC needs; pin a
-      reference trajectory and get an exact posterior, not an approximate
-      one.
-    \item \textbf{Ancestor sampling (PGAS)} as the likely key to making
-      Particle Gibbs mix well, given the plate-wise ESS unevenness the
-      source term trick already lets us measure.
-  \end{itemize}
-\end{frame}
-
-% =============================================================
 \section*{Wrap-up}
 % =============================================================
 
@@ -481,9 +424,6 @@
     \item QEM closes the loop: uses those moments as a gradient-free,
       reparameterization-invariant E-step, beating MP-VI and MP-RWS on both
       speed and (at worst) matching them on accuracy.
-    \item That whole stack opens up further work: measuring MP-IS bias in
-      practice, better debiasing, and exact inference via Particle Gibbs,
-      all building directly on $\hat P_{\text{MP}}$'s unbiasedness.
   \end{itemize}
 \end{frame}
 

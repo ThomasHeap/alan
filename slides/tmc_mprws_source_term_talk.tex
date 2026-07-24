@@ -14,7 +14,7 @@
 \setbeamercolor{progress bar}{fg=talkcoral,bg=talkteal!20}
 \setbeamercolor{alerted text}{fg=talkcoral}
 
-\title{Tensor Monte Carlo, Massively-Parallel RWS, and the Source Term Trick}
+\title{TMC, MP-RWS, MPIW, the Source Term Trick, and QEM}
 \subtitle{How \texttt{alan} does inference --- plus a look at some newer empirical follow-ups}
 \author{}
 \date{}
@@ -167,23 +167,25 @@
 \end{frame}
 
 % =============================================================
-\section{The MP-IW bound}
+\section{MPIW}
 % =============================================================
 
-\begin{frame}{From IWAE to Massively-Parallel Importance-Weighted}
+\begin{frame}{From ``global'' to massively-parallel importance weighting}
+  MP-RWS trains $P$ and $Q$. \textbf{MPIW} (Bowyer, Heap \& Aitchison, UAI
+  2024) asks a different question: once trained, how do we get
+  \emph{posterior expectations} back out?
   \begin{itemize}
-    \item The IWAE bound: average $K$ \emph{whole-vector} importance
-      weights, take the log --- gets tighter (closer to $\log p(x)$) as $K$
-      grows.
-    \item \textbf{MP-IW}: the same idea, but the $K$ particles are per
-      latent, contracted via the plate structure --- so the bound gets
-      tighter per unit of \emph{actual} compute, not just per unit of $K$.
-    \item Practically: many more effective ``combinations'' are being
-      averaged over for the same memory/compute budget.
+    \item \textbf{Global} importance weighting: draw $K$ whole-vector
+      samples, reweight, average --- the classical scheme.
+    \item \textbf{Massively-parallel} importance weighting (MPIW): draw $K$
+      \emph{per latent}, reweight \emph{all} $K^{\#\text{latents}}$
+      combinations (same trick as before), and use \emph{that} as the
+      importance-sampling estimator of a posterior expectation.
   \end{itemize}
   \vfill
-  \small This bound is exactly what \texttt{alan} exposes as
-  \texttt{sample.elbo\_rws()} / \texttt{elbo\_vi()} in the code.
+  \small This is the same $\hat P_{\text{MP}}(z)$ construction as before, now
+  reframed as a general-purpose importance-weighting tool in its own right
+  --- not just something living inside the RWS training loop.
 \end{frame}
 
 % =============================================================
@@ -191,7 +193,8 @@
 % =============================================================
 
 \begin{frame}{The remaining problem}
-  MP-RWS gives you a great scalar (the bound) and gradients for training.
+  MPIW gives an unbiased posterior-expectation \emph{estimator}. In
+  principle you plug in the quantity you want and reweight.
   \vfill
   But once you have a trained $P,Q$: how do you get
   \begin{itemize}
@@ -258,20 +261,100 @@
 \end{frame}
 
 % =============================================================
+\section{QEM}
+% =============================================================
+
+\begin{frame}{Training $Q$ still needs gradients}
+  MP-VI and MP-RWS both update $Q$'s parameters $\phi$ by \textbf{gradient
+  ascent} on a massively-parallel bound.
+  \begin{itemize}
+    \item Needs a learning rate, tuned per model.
+    \item \alert{Not invariant to reparameterization}: rescale a latent by a
+      constant (leaving the actual distribution over data untouched) and
+      gradient descent's behaviour changes --- sometimes it stops converging
+      at all.
+  \end{itemize}
+  \vfill
+  \textbf{QEM} (Heap, Bowyer \& Aitchison, 2025) removes gradient descent
+  from the $Q$ update entirely.
+\end{frame}
+
+\begin{frame}{The QEM idea}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{E-step}
+        Use MPIW + the source term trick to compute the \emph{current}
+        posterior moments, exactly as before.
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{block}{M-step}
+        Set $Q$'s \emph{next} parameters directly from those moments ---
+        closed form, for exponential-family $Q$ (Gaussian, Gamma, Beta,
+        Dirichlet, Binomial, \dots).
+      \end{block}
+    \end{column}
+  \end{columns}
+  \vfill
+  \small The name: it resembles EM, but optimizes the parameters of the
+  \emph{approximate posterior} $Q$ --- not the model's prior/likelihood
+  parameters $\theta$, as classical EM does. Hence ``QEM.''
+\end{frame}
+
+\begin{frame}[fragile]{Algorithm}
+  \begin{center}
+  \begin{tikzpicture}[node distance=2mm,
+      box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
+    \node[box,fill=talkteal!10] (a) {for t in 1..T:\\
+      \ \ Q\_t = set\_exp\_family\_params(m[t-1])\ \ \# M-step\\
+      \ \ z = sample(Q\_t)\\
+      \ \ m\_new = MPIW\_moments(z, Q\_t)\ \ \ \ \ \# E-step\\
+      \ \ m[t] = lambda*m\_new + (1-lambda)*m[t-1]\ \# smoothing};
+  \end{tikzpicture}
+  \end{center}
+  \vfill
+  \begin{itemize}
+    \item No gradients, no learning rate --- just moment matching.
+    \item The exponential moving average on the last line matters: a single
+      noisy moment estimate can otherwise cause pathological collapse
+      (e.g.\ near-zero effective weight on all but one sample). Provably
+      converges to the unbiased, zero-variance estimate as $T \to \infty$.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Results, on five real hierarchical models}
+  \begin{itemize}
+    \item \textbf{Faster}: fewer iterations \emph{and} less wall-clock time
+      than MP-VI and MP-RWS across Bus Breakdown, MovieLens100K, Occupancy,
+      Radon, and Covid --- no backprop through the whole joint per step.
+    \item \textbf{At least as accurate}: posterior first-moment MSE (vs.\
+      long HMC runs) at least as good as MP-RWS, and clearly better than
+      MP-VI, throughout.
+    \item \alert{Reparameterization invariant, exactly}: rescale a latent by
+      $\times 1/100$ (then back), QEM's trajectory is unchanged. MP-VI
+      \emph{fails to converge at all within 250 iterations} on the
+      reparameterized Radon and Covid models --- a real, measured failure,
+      not a hypothetical one.
+  \end{itemize}
+\end{frame}
+
+% =============================================================
 \section{How it fits together}
 % =============================================================
 
 \begin{frame}{The whole picture}
   \begin{center}
-  \begin{tikzpicture}[node distance=6mm,
-      box/.style={draw,rounded corners,minimum width=70mm,minimum height=8mm,align=center,font=\small}]
-    \node[box,fill=talkteal!15] (tmc) {\textbf{Tensor Monte Carlo}\\ $K$ particles per latent, contracted via the plate graph};
-    \node[box,fill=talkteal!25,below=of tmc] (mprws) {\textbf{Massively-Parallel RWS}\\ turns the estimator into a wake/sleep training loop, proves $\hat P_{\text{MP}}$ unbiased};
-    \node[box,fill=talkteal!35,below=of mprws] (mpiw) {\textbf{MP-IW bound}\\ the wake-phase objective, IWAE-style but per-latent};
-    \node[box,fill=talkcoral!25,below=of mpiw] (source) {\textbf{Source term trick}\\ reuses the same contraction, via autodiff, for samples/marginals/moments};
+  \begin{tikzpicture}[node distance=3mm,
+      box/.style={draw,rounded corners,minimum width=76mm,minimum height=7mm,align=center,font=\footnotesize}]
+    \node[box,fill=talkteal!15] (tmc) {\textbf{Tensor Monte Carlo}: $K$ particles per latent, contracted via the plate graph};
+    \node[box,fill=talkteal!25,below=of tmc] (mprws) {\textbf{Massively-Parallel RWS}: turns the estimator into a wake/sleep training loop, proves $\hat P_{\text{MP}}$ unbiased};
+    \node[box,fill=talkteal!35,below=of mprws] (mpiw) {\textbf{MPIW}: reframes the same estimator as a general posterior-expectation tool};
+    \node[box,fill=talkcoral!25,below=of mpiw] (source) {\textbf{Source term trick}: reuses the same contraction, via autodiff, for samples/marginals/moments};
+    \node[box,fill=talkcoral!35,below=of source] (qem) {\textbf{QEM}: uses those moments as a gradient-free, reparam-invariant E-step to train $Q$};
     \draw[-{Latex[length=2mm]}] (tmc) -- (mprws);
     \draw[-{Latex[length=2mm]}] (mprws) -- (mpiw);
     \draw[-{Latex[length=2mm]}] (mpiw) -- (source);
+    \draw[-{Latex[length=2mm]}] (source) -- (qem);
   \end{tikzpicture}
   \end{center}
 \end{frame}
@@ -347,18 +430,22 @@
 % =============================================================
 
 \begin{frame}{Summary}
+  \small
   \begin{itemize}
     \item TMC makes $K$-per-latent tractable by contracting along the plate
       graph.
     \item MP-RWS turns that estimator into a training algorithm, and proves
-      it unbiased.
-    \item The MP-IW bound is the resulting wake-phase objective --- IWAE,
-      scaled per latent instead of per whole vector.
+      $\hat P_{\text{MP}}$ unbiased.
+    \item MPIW reframes the same estimator as a general tool for posterior
+      expectations, not just RWS training.
     \item The source term trick gets samples/marginals/moments out of the
       \emph{same} computation, via autodiff, for free.
-    \item That unbiasedness is now being put to work: empirical bias
-      checks, a real reduction-order finding, and two exact/debiasing
-      prototypes building directly on it.
+    \item QEM closes the loop: uses those moments as a gradient-free,
+      reparameterization-invariant E-step, beating MP-VI and MP-RWS on both
+      speed and (at worst) matching them on accuracy.
+    \item That whole stack is now being put to work: empirical bias checks,
+      a real reduction-order finding, and two exact/debiasing prototypes
+      building directly on $\hat P_{\text{MP}}$'s unbiasedness.
   \end{itemize}
 \end{frame}
 

@@ -232,73 +232,54 @@
     \qquad
     \hat P_{\text{MP}}(z) = \frac{1}{K^n}\sum_{\mathbf{k}\in\mathcal{K}^n} r_{\mathbf{k}}(z)
   \]
-  and, for any moment function $m(\cdot)$, the posterior-expectation estimate:
-  \[
-    \hat m_{\text{MP}}(z) = \frac{1}{K^n}\sum_{\mathbf{k}\in\mathcal{K}^n} \frac{r_{\mathbf{k}}(z)}{\hat P_{\text{MP}}(z)}\, m(z^{\mathbf{k}})
-  \]
   \vfill
   \small $r_{\mathbf{k}}(z)$ factorizes into low-rank tensors along the graph
-  (as on the TMC slide), so both sums are computed via
-  \texttt{opt\_einsum}, never by looping over all $K^n$ terms directly.
-\end{frame}
-
-\begin{frame}[fragile]{The shape of an MPIW call}
-  \begin{center}
-  \begin{tikzpicture}[node distance=2mm,
-      box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
-    \node[box,fill=talkteal!10] (a) {z\_i: [K] for each latent i\ \ \ \ \ \ \ \# one axis per latent\\
-      r\_k = P(x, z\^{}k) / Q\_MP(z\^{}k)\ \ \ \ \# tensor, shape [K]*n\\
-      P\_MP = r\_k.mean(all k axes)\ \ \ \ \ \# scalar\\
-      m\_MP = ((r\_k / P\_MP) * m(z\^{}k)).mean(all k axes)};
-  \end{tikzpicture}
-  \end{center}
-  \vfill
-  \begin{itemize}
-    \item Input: $K$ particles per latent. Output: a scalar
-      ($\hat P_{\text{MP}}$) or a moment ($\hat m_{\text{MP}}$), never a
-      $K^n$-sized object materialized in memory.
-    \item Same shape whether you're computing the ELBO, an RWS update, or a
-      posterior moment; only $m(\cdot)$ changes.
-  \end{itemize}
+  (as on the TMC slide), so this sum is computed via \texttt{opt\_einsum},
+  never by looping over all $K^n$ terms directly, giving one scalar,
+  $\hat P_{\text{MP}}(z)$, per forward pass.
 \end{frame}
 
 % =============================================================
 \section{The source term trick}
 % =============================================================
 
-\begin{frame}{The remaining problem}
-  MPIW gives an unbiased posterior-expectation \emph{estimator}. In
-  principle you plug in the quantity you want and reweight.
-  \vfill
-  But once you have a trained $P,Q$: how do you get
+\begin{frame}{Why can't we just calculate moments like that?}
+  A posterior moment estimate looks like a similarly simple sum:
+  \[
+    \hat m_{\text{MP}}(z) = \frac{1}{K^n}\sum_{\mathbf{k}\in\mathcal{K}^n} \frac{r_{\mathbf{k}}(z)}{\hat P_{\text{MP}}(z)}\, m(z^{\mathbf{k}})
+  \]
   \begin{itemize}
-    \item posterior \textbf{samples},
-    \item posterior \textbf{marginals} (the per-latent weight distribution
-      over its $K$ particles),
-    \item posterior \textbf{moments} (means, variances, covariances)
+    \item $\hat P_{\text{MP}}(z)$ is one \emph{forward} pass along the graph
+      (contract, get a scalar): the TMC/MPIW trick handles that.
+    \item But $\hat m_{\text{MP}}(z)$ needs, for \emph{each individual
+      particle}, how much it contributed to that total. That means a
+      \alert{backward} pass through the same contraction, like backprop
+      through the sum-product graph.
+    \item That backward pass is genuinely complex, and \alert{different for
+      every quantity}: a sample, a marginal, a mean, a covariance each need
+      their own hand-written traversal, for every plate topology.
   \end{itemize}
-  back out, \alert{without writing a bespoke resampling algorithm for every
-  different plate topology}?
 \end{frame}
 
-\begin{frame}{The trick}
-  \emph{Using Autodiff to Estimate Posterior Moments, Marginals and Samples}
-  (Bowyer, Heap \& Aitchison, UAI 2024):
-  \begin{enumerate}
-    \item Add an auxiliary \textbf{source term} $J$ into the log joint,
-      additively, before running the \emph{exact same} $K$-dim contraction
-      used to compute the bound.
-    \item That contraction now computes a scalar $L(J)$ instead of just
-      $L(0)$.
-    \item \alert{Differentiate $L(J)$ w.r.t.\ $J$, at $J=0$, using ordinary
-      autodiff.} The derivative \emph{is} the marginal / moment you wanted.
-  \end{enumerate}
+\begin{frame}{The math of the source term trick}
+  Add a source term $J$ into the log joint, forming a modified normalizing
+  constant (Bowyer, Heap \& Aitchison, UAI 2024):
+  \[
+    Z_m(J) = \int \! dz'\, P(x,z')\, e^{J\,m(z')}
+    \qquad\Rightarrow\qquad
+    \left.\frac{\partial}{\partial J}\log Z_m(J)\right|_{J=0} = \mathbb{E}_{P(z'|x)}[m(z')]
+  \]
+  The massively-parallel analogue replaces the integral with the same
+  contraction as before, now carrying $J$ through it:
+  \[
+    \hat P_{\text{MP}}^{\exp}(z,J) = \frac{1}{K^n}\sum_{\mathbf{k}} r_{\mathbf{k}}(z)\, e^{J\,m(z^{\mathbf{k}})}
+    \qquad\Rightarrow\qquad
+    \left.\frac{\partial}{\partial J}\log \hat P_{\text{MP}}^{\exp}(z,J)\right|_{J=0} = \hat m_{\text{MP}}(z)
+  \]
   \vfill
-  \small Exactly the same move as getting moments from
-  $\partial \log Z[J] / \partial J$ for a log-partition function with an
-  external source $J$: a very old idea in statistical physics and
-  exponential families, applied here to a Monte Carlo estimator instead of
-  an analytic one.
+  \small $J=0$ recovers $\hat P_{\text{MP}}(z)$ exactly, so this costs one
+  extra forward pass plus one ordinary autodiff call, not a hand-written
+  backward traversal.
 \end{frame}
 
 \begin{frame}{Why this is the elegant part}
@@ -311,6 +292,26 @@
       free.
     \item It's autodiff doing the bookkeeping that would otherwise be a
       hand-written, model-specific resampling routine.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{The shape of a source-term-trick call}
+  \begin{center}
+  \begin{tikzpicture}[node distance=2mm,
+      box/.style={draw,rounded corners,align=left,font=\footnotesize\ttfamily,minimum width=105mm,inner sep=3mm}]
+    \node[box,fill=talkteal!10] (a) {J: zeros, same shape as z\_i (one entry per particle)\\
+      L\_of\_J = log P\_MP\_exp(z, J)\ \ \ \ \ \ \ \ \# scalar, same forward pass as before\\
+      m\_MP = grad(L\_of\_J, J)\ \ \ \ \ \ \ \ \ \ \ \ \ \# same shape as J};
+  \end{tikzpicture}
+  \end{center}
+  \vfill
+  \begin{itemize}
+    \item Input: a zero tensor $J$ shaped like whichever latent's particles
+      you want a quantity for. Output: a tensor the \emph{same shape},
+      holding one number per particle.
+    \item One \texttt{grad} call replaces a bespoke backward traversal;
+      samples, marginals, and moments all use this exact shape, only
+      $m(\cdot)$ (baked into $L(J)$) changes.
   \end{itemize}
 \end{frame}
 

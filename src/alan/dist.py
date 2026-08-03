@@ -84,21 +84,34 @@ def apply_func_val(func_val, scope):
         return func_val
 
 class _Dist:
-    def __init__(self, *args, sample_shape=t.Size([]), **kwargs):
+    def __init__(self, *args, sample_shape=t.Size([]), ref_val_key=None, **kwargs):
         self.args = args
         self.sample_shape = sample_shape
         self.kwargs = kwargs
+        #Optional: name of a scope entry (a plain, K-dim-free tensor, e.g.
+        #bound in as a BoundPlate `inputs` entry) holding a pinned reference
+        #value for this random variable. When set, K-index 0 of the STORED
+        #sample is overwritten with that value. This is the mechanism that
+        #actually matters for CSMC-style reference pinning to be visible to
+        #log_prob (see Timeseries.py's ref_init_key docstring for the
+        #distinction between this and pinning an ephemeral, sampling-time-
+        #only copy): log_prob reads a variable's value straight out of the
+        #stored sample dict, so the reference value has to be present there,
+        #not just in some other consumer's private, differently-relabelled
+        #copy of it.
+        self.ref_val_key = ref_val_key
 
         if len(args) + len(kwargs) != self.nargs:
             raise Exception(f"Wrong number of arguments provided to {type(self)}")
 
     def finalize(self, varname):
         return Dist(
-            varname=varname, 
-            dist=self.dist, 
-            args=self.args, 
-            sample_shape=self.sample_shape, 
-            kwargs=self.kwargs
+            varname=varname,
+            dist=self.dist,
+            args=self.args,
+            sample_shape=self.sample_shape,
+            kwargs=self.kwargs,
+            ref_val_key=self.ref_val_key,
         )
 
 class Dist(torch.nn.Module):
@@ -118,12 +131,13 @@ class Dist(torch.nn.Module):
     Critically, we extract the argument name from e.g. `lambda a: a.exp()` and use it to extract the right 
     variable from the scope.
     """
-    def __init__(self, varname, dist, args, sample_shape, kwargs):
+    def __init__(self, varname, dist, args, sample_shape, kwargs, ref_val_key=None):
         super().__init__()
         #A tensor that e.g. moves to GPU when we call `problem.to(device='cuda')`.
         self.is_timeseries = False
 
         self.dist = dist
+        self.ref_val_key = ref_val_key
 
         self.register_buffer("_device_tensor", t.zeros(()))
 
@@ -199,6 +213,11 @@ class Dist(torch.nn.Module):
                 self.val_args[distargname] = func_val
 
         self.tensor_args = BufferStore(tensor_args)
+        if ref_val_key is not None:
+            #filter_scope/the sample_gdt equivalent filters scope down to
+            #all_args before sample() is called, so ref_val_key must be
+            #listed here or it's silently dropped before sample() sees it.
+            all_args.update((ref_val_key,))
         self.all_args = list(all_args)
 
     @property
@@ -302,11 +321,21 @@ class Dist(torch.nn.Module):
         return self.tdd(scope).log_prob(sample), None
 
     def sample(self, scope, reparam, active_platedims, K_dim, timeseries_perm=None):
-        return self.tdd(scope).sample(
-            reparam=reparam, 
+        sample = self.tdd(scope).sample(
+            reparam=reparam,
             sample_dims=[*active_platedims, K_dim],
             sample_shape=self.sample_shape,
         )
+
+        #Pin K-index 0 of the STORED sample to a reference value, if one was
+        #provided. Built with cat, not in-place indexing, so this stays safe
+        #under autograd (reparam=True) -- mirrors Timeseries.sample's pin.
+        if self.ref_val_key is not None and self.ref_val_key in scope:
+            ref_val = scope[self.ref_val_key]
+            ordered = sample.order(K_dim)
+            sample = t.cat([ref_val[None, ...], ordered[1:]], 0)[K_dim]
+
+        return sample
 
     def move_number_device(self, param_name, param):
         assert isinstance(param, Number)

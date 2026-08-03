@@ -2,6 +2,7 @@ import torch.nn as nn
 from .dist import _Dist, sample_gdt
 from .utils import *
 from .Sampler import Sampler
+from .Split import Split, SplitDims
 
 from typing import Optional
 
@@ -54,7 +55,7 @@ class Timeseries(nn.Module):
     Note:
        OptParam and QEMParam are currently banned in timeseries.
     """
-    def __init__(self, init, trans):
+    def __init__(self, init, trans, chunk_size=None):
         super().__init__()
 
         self.qem_dist = False
@@ -69,11 +70,19 @@ class Timeseries(nn.Module):
         if trans.sample_shape != t.Size([]):
             raise Exception("sample_shape on the transition distribution must not be set; if you want a sample_shape, it needs to be on the initial state")
 
+        if chunk_size is not None and (not isinstance(chunk_size, int) or chunk_size < 1):
+            raise Exception("chunk_size, if given, must be a positive int")
+
         self.init = init
         self.trans = trans.finalize(None)
         assert not self.trans.qem_dist
         #Will include own name, but that'll be eliminated in the first step of sample_gdt
-        self.all_args = [init, *self.trans.all_args] 
+        self.all_args = [init, *self.trans.all_args]
+        #Optional: process log_prob's expensive T-length computation in checkpointed
+        #chunks along T, trading recompute (during backward) for peak autograd memory.
+        #See log_prob / _log_prob_chunked. None (the default) preserves the original,
+        #unchunked behaviour exactly.
+        self.chunk_size = chunk_size
 
     @property
     def opt_qem_params(self):
@@ -225,7 +234,10 @@ class Timeseries(nn.Module):
         scope = {**scope}
         scope['prev'] = sample_prev
 
-        lp, _ = self.trans.log_prob(sample, scope, None, None)
+        if self.chunk_size is not None and self.chunk_size < T_dim.size:
+            lp = self._log_prob_chunked(sample, scope, T_dim)
+        else:
+            lp, _ = self.trans.log_prob(sample, scope, None, None)
         set_dims_lp = set(generic_dims(lp))
 
         assert Kinit_dim in set_dims_lp
@@ -233,3 +245,42 @@ class Timeseries(nn.Module):
         assert T_dim in set_dims_lp
 
         return lp, Kinit_dim
+
+    def _log_prob_chunked(self, sample, scope, T_dim):
+        """
+        Computes exactly what `self.trans.log_prob(sample, scope, None, None)` would,
+        but in chunks of self.chunk_size along T_dim, each wrapped in
+        torch.utils.checkpoint.checkpoint (mirroring the existing pattern in
+        logpq.py's _logPQ_plate_checkpointed). This bounds the size of the autograd
+        graph retained for backward to one chunk's worth, recomputing each chunk's
+        forward pass during backward instead of storing all T chunks' intermediate
+        activations simultaneously -- the dominant real memory cost for long T.
+
+        Does not (yet) bound the *stored* size of the resulting lp tensor itself, nor
+        change sample_Ks_timeseries's backward smoothing loop; see docs/pmcmc_design.md-
+        style follow-up notes in the branch README for what remains open.
+        """
+        splitter = SplitDims(Split(str(T_dim), self.chunk_size), {str(T_dim): T_dim})
+
+        #Chunk every scope entry (and sample) that actually carries T_dim, exactly
+        #mirroring the generic T_dim-carrying check already used in Timeseries.sample.
+        chunked_scope_keys = [k for k, v in scope.items() if T_dim in set(generic_dims(v))]
+        scope_chunks = {k: splitter.split_tensor(scope[k]) for k in chunked_scope_keys}
+        sample_chunks = splitter.split_tensor(sample)
+
+        def _chunk_fn(args, kwargs):
+            return self.trans.log_prob(*args, **kwargs)
+
+        lp_chunks = []
+        for i, split_dim in enumerate(splitter.split_dims):
+            chunk_scope = {**scope, **{k: scope_chunks[k][i] for k in chunked_scope_keys}}
+            lp_chunk, _ = t.utils.checkpoint.checkpoint(
+                _chunk_fn, (sample_chunks[i], chunk_scope, None, None), {}, use_reentrant=False,
+            )
+            #Move this chunk's own T-sub-dim to a plain leading axis, ready to `cat`;
+            #any other torchdims (Kinit_dim, K_dim, plate dims) stay first-class and
+            #must therefore agree across chunks, which they do (they're shared, not
+            #chunked).
+            lp_chunks.append(lp_chunk.order(split_dim))
+
+        return t.cat(lp_chunks, 0)[T_dim]

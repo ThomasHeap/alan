@@ -118,13 +118,23 @@ def sample_Ks_timeseries(lps, Ks_to_sum, ts_init_Ks, N_dim, num_samples, T_dim, 
             ts_indices = t.zeros((num_samples, *plate_dim_sizes, T_dim.size, ), dtype=t.int64)[N_dim, plate_dims, ...]
 
 
+        # Precompute the forward filtering prefix products incrementally: cumulative[t_idx]
+        # is chain_logmmexp(lp_ordered[:t_idx+1]), i.e. exactly what the loop below used to
+        # recompute from scratch at every t_idx (T separate chain_logmmexp calls, over
+        # prefixes of average length T/2 -> O(T^2) total matrix multiplies). Building the
+        # T prefix products once, incrementally, is O(T) total instead.
+        lp_ordered = lp.order(T_dim, init_K_dim, K_dim)
+        cumulative = [lp_ordered[0]]
+        for t_idx in range(1, T_dim.size):
+            cumulative.append(logmmexp(cumulative[-1], lp_ordered[t_idx]))
+
         filtered_t_plus_one = None
         smoothed_t_plus_one = None
 
         for t_idx in range(T_dim.size-1,-1,-1):
             # this filtering/forward-run gives us log p(x_t | y_{1:t}, x_{1:t-1}) as a K x K tensor
-            filtered_t = chain_logmmexp(lp.order(T_dim, init_K_dim, K_dim)[:t_idx+1])[init_K_dim, K_dim]
-            
+            filtered_t = cumulative[t_idx][init_K_dim, K_dim]
+
             # index into filtered_t with the ts_init_Ks indices to get the filtering distribution as a K-long vector
             filtered_t = filtered_t.order(init_K_dim)[indices[init_K_dim]]
             filtered_t = filtered_t.order(N_dim)

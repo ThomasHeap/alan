@@ -54,7 +54,7 @@ class Timeseries(nn.Module):
     Note:
        OptParam and QEMParam are currently banned in timeseries.
     """
-    def __init__(self, init, trans, ref_traj_key=None):
+    def __init__(self, init, trans, ref_traj_key=None, ref_init_key=None):
         super().__init__()
 
         self.qem_dist = False
@@ -76,9 +76,12 @@ class Timeseries(nn.Module):
         self.all_args = [init, *self.trans.all_args]
         if ref_traj_key is not None:
             #sample_gdt filters scope down to self.all_args before calling
-            #dist.sample(...), so ref_traj_key must be listed here or it's
-            #silently dropped before Timeseries.sample ever sees it.
+            #dist.sample(...), so ref_traj_key/ref_init_key must be listed
+            #here or they're silently dropped before Timeseries.sample ever
+            #sees them.
             self.all_args = [*self.all_args, ref_traj_key]
+        if ref_init_key is not None:
+            self.all_args = [*self.all_args, ref_init_key]
         #Optional: name of a scope entry (a plain, K-dim-free, T-dim-carrying
         #tensor, e.g. bound in as a Q BoundPlate `inputs` entry) holding a
         #pinned reference trajectory. When set, K-index 0 of every timestep's
@@ -87,6 +90,18 @@ class Timeseries(nn.Module):
         #alan's dense (no intermediate resampling) K x K Timeseries machinery.
         #None (the default) preserves the original, unpinned behaviour exactly.
         self.ref_traj_key = ref_traj_key
+        #Optional: name of a scope entry (a plain, K-dim-free, no-T-dim
+        #scalar/plate-shaped tensor) holding the reference trajectory's
+        #INITIAL state. This must be applied here, to `prev_state`, NOT via
+        #Dist's own ref_val_key on init's own distribution: init is a parent
+        #variable, so by the time Timeseries.sample runs, sample_gdt's
+        #`sampler.resample_scope(...)` call has already relabelled/permuted
+        #init's own K-dim to match this Timeseries's K_dim (PermutationSampler's
+        #ordinary parent-particle mixing) -- which silently scrambles which
+        #physical value ends up at K-index 0. Pinning init's own Dist output
+        #therefore doesn't survive the trip here; pinning prev_state directly,
+        #after that relabelling has already happened, does.
+        self.ref_init_key = ref_init_key
 
     @property
     def opt_qem_params(self):
@@ -101,6 +116,15 @@ class Timeseries(nn.Module):
         #Check that prev_state has the right dimensions
         if set(prev_state.dims) != set([K_dim, *other_platedims]):
             raise Exception(f"Initial state, {self.init}, doesn't have the right dimensions; the initial state must be defined one step up in the plate heirarchy")
+
+        #Pin K-index 0 of the initial state too, so the reference trajectory
+        #is coherent end-to-end (see ref_init_key's docstring above -- this
+        #must happen here, post-resample_scope-relabelling, not on init's own
+        #Dist output).
+        if self.ref_init_key is not None and self.ref_init_key in scope:
+            ref_init_val = scope[self.ref_init_key]
+            ordered = prev_state.order(K_dim)
+            prev_state = t.cat([ref_init_val[None, ...], ordered[1:]], 0)[K_dim]
 
         sample_timesteps = []
 

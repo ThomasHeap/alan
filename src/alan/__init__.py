@@ -10,6 +10,7 @@ from .Timeseries import Timeseries
 from .moments import mean, mean2, var
 from .Split import Split, no_checkpoint, checkpoint
 from .Param import OptParam, QEMParam
+from .pmmh import pmmh, PMMHResult
 
 from .Sample import Sample
 from .Marginals import Marginals

@@ -120,6 +120,89 @@ python3 pg_validate.py      # full accuracy + mixing-speed comparison (~a few mi
 
 Needs only `torch` (no alan dependency — this experiment is fully standalone).
 
+## Harder model: nonlinear/non-Gaussian (Gordon, Salmond & Smith 1993)
+
+The linear-Gaussian model above is unimodal and has a closed-form posterior —
+too easy to be a stress test on its own. `nonlinear_*.py` repeats the same
+comparison on the standard nonlinear/non-Gaussian benchmark from the
+particle-filtering literature:
+
+```
+x_0 ~ N(0, 5)
+x_t = 0.5 x_{t-1} + 25 x_{t-1}/(1+x_{t-1}^2) + 8 cos(1.2 t) + N(0, 10),  t = 1..20
+y_t = x_t^2 / 20 + N(0, 1)                                               (observed)
+```
+
+No closed-form posterior (Kalman/RTS don't apply), so ground truth instead
+comes from a grid-based/point-mass HMM forward-backward filter (Kitagawa
+1987) in `nonlinear_ssm_model.py` — discretize the 1D state onto a fine grid
+(800 points over [-40, 40]) and run exact forward-backward on the resulting
+HMM. And because `y_t` is quadratic in `x_t`, the filtering/smoothing
+marginals are genuinely **bimodal** at several timesteps (e.g. `x_0`, `x_1`:
+~88%/12% split) — a much sterner test of whether a single reference
+trajectory can represent the posterior at all, on top of the usual mixing
+question.
+
+`nonlinear_bootstrap_pf.py`, `nonlinear_particle_gibbs.py`, and
+`nonlinear_pg_validate.py` mirror the linear-model files' structure exactly,
+with the transition/observation densities swapped in — CSMC/PGAS themselves
+are model-agnostic.
+
+### Results (2000 iterations, 200 burn-in, unless noted)
+
+**Posterior-mean accuracy** (RMSE vs. the grid-smoother mean):
+
+| K | plain PG | PGAS | plain bootstrap PF (fresh run, no chain) |
+|---|---|---|---|
+| 50 | 0.2742 | **0.0254** | 2.9919 |
+| 200 | 0.0934 | **0.0249** | 0.7296 |
+| 500 | 0.0523 | **0.0266** | 0.8181 |
+
+Same qualitative story as the linear case, but the gaps are far larger — a
+fresh bootstrap-PF genealogy is off by whole units even at K=500, since path
+degeneracy here is severe enough (see below) that it usually locks onto
+*one* mode's history and never recovers the other.
+
+**Bimodality check** — `P(x_t > 0)` at `t=0,1`, grid ground truth vs. chain, K=200:
+
+| | t | grid | plain PG | PGAS |
+|---|---|---|---|---|
+| | 0 | 0.885 | 0.885 (diff 0.001) | 0.880 (diff 0.006) |
+| | 1 | 0.888 | 0.885 (diff 0.003) | 0.883 (diff 0.005) |
+
+Both variants recover the true mode weights closely at this K — the
+reference trajectory does successfully hop between modes over the course of
+the chain, for both plain PG and PGAS. The real difference between them
+shows up in mixing speed, not asymptotic accuracy.
+
+**Mixing speed** — chain ESS of `x_0` (bimodal *and* furthest from the data):
+
+| K | plain PG chain ESS | PGAS chain ESS | speedup |
+|---|---|---|---|
+| 50 | 29.0 / 1800 (1.6%) | **1421.7** / 1800 (79.0%) | 49.1x |
+| 200 | 607.2 / 1800 (33.7%) | **1709.8** / 1800 (95.0%) | 2.8x |
+| 500 | 1090.2 / 1800 (60.6%) | **1801.0** / 1800 (100.1%) | 1.7x |
+
+**Path degeneracy** is much worse than the linear case at matched K (K=50:
+1/50 unique ancestors survive to `t=0` in one bootstrap-PF sweep; K=200:
+3/200) — consistent with this being a notoriously hard benchmark precisely
+*because* of its nonlinearity and near-uninformative observations.
+
+Bottom line: PGAS's advantage over plain PG, already clear on the easy linear
+model, gets substantially larger on a harder, genuinely multimodal target —
+and, encouragingly, neither variant silently collapses onto a single mode at
+the K values tested here.
+
+### Reproducing
+
+```
+cd experiments/particle_gibbs
+python3 nonlinear_ssm_model.py        # model + grid filter/smoother sanity check
+python3 nonlinear_bootstrap_pf.py     # log-lik bias vs K, path degeneracy demo
+python3 nonlinear_particle_gibbs.py   # PG/PGAS smoke test
+python3 nonlinear_pg_validate.py      # full accuracy + bimodality + mixing-speed comparison (~5 minutes)
+```
+
 ## What this doesn't cover
 
 This validates the *algorithm*, not an alan integration — `csmc_sweep` is

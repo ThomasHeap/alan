@@ -54,7 +54,7 @@ class Timeseries(nn.Module):
     Note:
        OptParam and QEMParam are currently banned in timeseries.
     """
-    def __init__(self, init, trans):
+    def __init__(self, init, trans, ref_traj_key=None):
         super().__init__()
 
         self.qem_dist = False
@@ -73,7 +73,20 @@ class Timeseries(nn.Module):
         self.trans = trans.finalize(None)
         assert not self.trans.qem_dist
         #Will include own name, but that'll be eliminated in the first step of sample_gdt
-        self.all_args = [init, *self.trans.all_args] 
+        self.all_args = [init, *self.trans.all_args]
+        if ref_traj_key is not None:
+            #sample_gdt filters scope down to self.all_args before calling
+            #dist.sample(...), so ref_traj_key must be listed here or it's
+            #silently dropped before Timeseries.sample ever sees it.
+            self.all_args = [*self.all_args, ref_traj_key]
+        #Optional: name of a scope entry (a plain, K-dim-free, T-dim-carrying
+        #tensor, e.g. bound in as a Q BoundPlate `inputs` entry) holding a
+        #pinned reference trajectory. When set, K-index 0 of every timestep's
+        #sample is overwritten with the reference value at that timestep --
+        #the CSMC "reference particle always present" mechanism, adapted to
+        #alan's dense (no intermediate resampling) K x K Timeseries machinery.
+        #None (the default) preserves the original, unpinned behaviour exactly.
+        self.ref_traj_key = ref_traj_key
 
     @property
     def opt_qem_params(self):
@@ -105,6 +118,18 @@ class Timeseries(nn.Module):
 
             #sample the next timestep
             sample_timestep = self.trans.sample(timeseries_scope, reparam, other_platedims, K_dim, None)
+
+            #Pin K-index 0 to the reference trajectory's value at this timestep, if
+            #one was provided. Overwriting (rather than e.g. never drawing a fresh
+            #sample there) keeps this a pure post-hoc pin: the K-index-0 slot still
+            #goes through the same code path as every other index, just with its
+            #drawn value discarded and replaced. Built with cat, not in-place
+            #indexing, so this stays safe under autograd (reparam=True).
+            if self.ref_traj_key is not None and self.ref_traj_key in timeseries_scope:
+                ref_val = timeseries_scope[self.ref_traj_key]
+                ordered = sample_timestep.order(K_dim)
+                sample_timestep = t.cat([ref_val[None, ...], ordered[1:]], 0)[K_dim]
+
             sample_timesteps.append(sample_timestep)
 
             #Permute this timestep, ready for being used as prev_state.

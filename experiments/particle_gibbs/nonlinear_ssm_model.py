@@ -22,6 +22,7 @@ ssm_model.py can't exercise:
 """
 import math
 import torch as t
+from grid_hmm import grid_filter_smoother as _grid_filter_smoother, marginal_mean_var
 
 Q_VAR, R_VAR, X0_VAR = 10.0, 1.0, 5.0
 T_STEPS = 20
@@ -48,8 +49,8 @@ def simulate(T=T_STEPS, seed=0):
     return x, y
 
 
-def _normal_pdf(x, mean, var):
-    return t.exp(-0.5 * (x - mean) ** 2 / var) / math.sqrt(2 * math.pi * var)
+def x0_logpdf(x):
+    return -0.5 * x ** 2 / X0_VAR - 0.5 * math.log(2 * math.pi * X0_VAR)
 
 
 def transition_logpdf(x_new, x_prev, tt):
@@ -60,62 +61,11 @@ def obs_logpdf(y_t, x_t):
     return -0.5 * (y_t - x_t ** 2 / 20) ** 2 / R_VAR - 0.5 * math.log(2 * math.pi * R_VAR)
 
 
-def _grid():
-    grid = t.linspace(-GRID_LIM, GRID_LIM, N_GRID, dtype=t.float64)
-    dx = (grid[-1] - grid[0]) / (N_GRID - 1)
-    return grid, dx
-
-
-def _transition_matrix(grid, dx, tt):
-    """M[i, j] ~= p(x_tt = grid[j] | x_{tt-1} = grid[i]) * dx, a nearly-row-
-    stochastic [N_GRID, N_GRID] matrix (rows sum to ~1, exactly 1 as
-    GRID_LIM -> inf and N_GRID -> inf)."""
-    means = f(grid, tt)  # [N_GRID], broadcast over the whole grid as x_{tt-1}
-    return _normal_pdf(grid[None, :], means[:, None], Q_VAR) * dx
-
-
 def grid_filter_smoother(y, T=T_STEPS):
-    """Exact (up to grid discretization) forward-filtering + backward-
-    smoothing posterior marginals, plus log p(y_1:T), via a point-mass HMM
-    (Kitagawa 1987). Returns (grid, alpha [T+1, N_GRID] filtered marginals,
-    gamma [T+1, N_GRID] smoothed marginals, log_lik). Both alpha and gamma
-    rows are probability masses over the grid, summing to 1."""
-    grid, dx = _grid()
-    y = y.double()
-
-    alpha = t.zeros(T + 1, N_GRID, dtype=t.float64)
-    alpha[0] = _normal_pdf(grid, 0.0, X0_VAR)
-    alpha[0] = alpha[0] / alpha[0].sum()
-
-    log_lik = 0.0
-    for tt in range(1, T + 1):
-        M = _transition_matrix(grid, dx, tt)
-        pred = alpha[tt - 1] @ M
-        lik = _normal_pdf(y[tt - 1], grid ** 2 / 20, R_VAR)
-        unnorm = pred * lik
-        total = unnorm.sum()
-        log_lik += total.log().item()
-        alpha[tt] = unnorm / total
-
-    beta = t.zeros(T + 1, N_GRID, dtype=t.float64)
-    beta[T] = 1.0
-    for tt in range(T, 0, -1):
-        M = _transition_matrix(grid, dx, tt)
-        lik = _normal_pdf(y[tt - 1], grid ** 2 / 20, R_VAR)
-        unnorm = M @ (lik * beta[tt])
-        beta[tt - 1] = unnorm / unnorm.sum()  # rescale to avoid underflow; gamma is a ratio, so this is exact
-
-    gamma = alpha * beta
-    gamma = gamma / gamma.sum(dim=1, keepdim=True)
-
-    return grid, alpha, gamma, log_lik
-
-
-def marginal_mean_var(grid, dist):
-    """dist: [..., N_GRID] grid probability masses (rows sum to 1)."""
-    mean = (dist * grid).sum(-1)
-    var = (dist * (grid - mean.unsqueeze(-1)) ** 2).sum(-1)
-    return mean, var
+    """Thin wrapper around grid_hmm's model-agnostic filter/smoother, fixing
+    in this model's own densities and grid settings. See grid_hmm.py for the
+    general recipe (Kitagawa 1987 point-mass HMM forward-backward)."""
+    return _grid_filter_smoother(y, T, GRID_LIM, N_GRID, x0_logpdf, transition_logpdf, obs_logpdf)
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ class PoissonConversion(AbstractConversion):
     sufficient_stats = (mean,)
     @staticmethod
     def conv2mean(rate):
-        return (mean,)
+        return (rate,)
     @staticmethod
     def mean2conv(mean):
         return {'rate': mean}
@@ -216,30 +216,6 @@ class GammaConversion(AbstractConversion):
     @staticmethod
     def canonical_conv(concentration, rate):
         return {'concentration': concentration, 'rate': rate}
-
-#class InverseGammaConversion(AbstractConversion):
-#PyTorch doesn't seem to have an Inverse Gamma distribution
-#    dist = staticmethod(InverseGamma)
-#    sufficient_stats = (t.log, t.reciprocal)
-#
-#    @staticmethod
-#    def conv2nat(alpha, beta):
-#        return (-alpha-1, -beta)
-#    @staticmethod
-#    def nat2conv(nat0, nat1):
-#        return (-nat0-1, -nat1)
-#
-#    @staticmethod
-#    def conv2mean(alpha, beta):
-#        #From Wikipedia (Inverse Gamma: Properties)
-#        return (t.log(beta) - t.digamma(alpha), alpha/beta)
-#    @staticmethod
-#    def mean2conv(mean_0, mean_1):
-#        return GammaConversion.mean2conv(-mean_0, mean_1)
-#
-#    @staticmethod
-#    def test_conv(N):
-#        return (t.randn(N).exp(),t.randn(N).exp())
 
 class MultivariateNormalConversion(AbstractConversion):
     dist = t.distributions.MultivariateNormal

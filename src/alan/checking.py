@@ -91,7 +91,7 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
             timeseries_P = dgpt_P
             timeseries_dist_Q = Q.flat_prog[name]
             if not isinstance(timeseries_dist_Q, (Dist, Timeseries, Data)):
-                raise Exception(f"{name} in P is a Timeseries, so {name} in Q should be a Timeseries or a Dist, but actually its a {type(groupQ)}.")
+                raise Exception(f"{name} in P is a Timeseries, so {name} in Q should be a Timeseries or a Dist, but actually its a {type(timeseries_dist_Q)}.")
             dist_Q = timeseries_dist_Q.trans if isinstance(timeseries_dist_Q, Timeseries) else timeseries_dist_Q
             check_support(name, timeseries_P.trans, dist_Q)
 
@@ -109,7 +109,7 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
 
             #Recurse
             check_PQ_plate(name, plateP, plateQ, data[name])
-        elif isisntance(dgpt_P, Data):
+        elif isinstance(dgpt_P, Data):
             raise Exception(f"{name} in P is Data.  But we can't have Data in P.")
         else:
             raise Exception(f"{name} is an unrecognised type (should be Plate, Group, Dist or Data (but can only be data in Q))")

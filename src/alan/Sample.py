@@ -242,7 +242,7 @@ class Sample():
             #Check that all variables are part of the same plate.
             active_platenames = groupvarname2platenames[groupvarnames[0]]
             set_active_platenames = set(active_platenames)
-            for groupvarname in groupvarnames[:1]:
+            for groupvarname in groupvarnames[1:]:
                 if set_active_platenames != set(groupvarname2platenames[groupvarname]):
                     raise Exception("Trying to compute marginal for variables at different plates; not sure this makes sense")
 

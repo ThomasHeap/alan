@@ -34,7 +34,6 @@ print(sample.detached_sample)
 print(sample.elbo_nograd())
 print(sample.elbo_vi())
 print(sample.elbo_rws())
-breakpoint()
 
 importance_sample = sample.importance_sample(N=10)
 print(importance_sample.dump())

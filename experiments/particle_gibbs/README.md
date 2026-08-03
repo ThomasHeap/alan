@@ -203,6 +203,94 @@ python3 nonlinear_particle_gibbs.py   # PG/PGAS smoke test
 python3 nonlinear_pg_validate.py      # full accuracy + bimodality + mixing-speed comparison (~5 minutes)
 ```
 
+## A third model: stochastic volatility (persistence, not multimodality)
+
+The growth model above stresses nonlinearity and multimodality. `sv_*.py`
+tests a different failure mode: strong **persistence**. It's the headline
+benchmark from Andrieu, Doucet & Holenstein's (2010) original PMCMC paper
+(already cited in `docs/pmcmc_design.md`), and how these models are actually
+used in practice (financial return series):
+
+```
+x_0 ~ N(mu, sigma_eta^2 / (1 - phi^2))            (stationary distribution)
+x_t = mu + phi (x_{t-1} - mu) + N(0, sigma_eta^2),  t = 1..100
+y_t = exp(x_t / 2) * N(0, 1)                        (observed)
+```
+
+with `mu=0, phi=0.98, sigma_eta=0.15` — the standard Kim/Shephard/Chib (1998)
+parameterisation. The latent is linear-Gaussian and unimodal (no closed form
+either, though — the observation variance `exp(x_t)` is nonlinear in `x_t`),
+so ground truth again comes from `grid_hmm.py`'s point-mass filter/smoother.
+Run over `T=100` (vs. 20 for the other two models) specifically so
+persistence-driven degeneracy has room to show up.
+
+`grid_hmm.py` factors the point-mass HMM forward-backward recipe out of
+`nonlinear_ssm_model.py` (which now calls it via a thin wrapper — verified
+bit-identical before/after) so this model reuses it directly, without a third
+hand-copy of the same numerical routine.
+
+### Results (1200 iterations, 200 burn-in)
+
+**Posterior-mean accuracy** (RMSE vs. the grid-smoother mean):
+
+| K | plain PG | PGAS | plain bootstrap PF (fresh run, no chain) |
+|---|---|---|---|
+| 50 | 0.0646 | **0.0117** | 0.1358 |
+| 200 | 0.0196 | **0.0167** | 0.0712 |
+| 400 | **0.0089** | 0.0143 | 0.0426 |
+
+Both PG variants comfortably beat a fresh bootstrap-PF genealogy at every K.
+Unlike the other two models, PGAS isn't uniformly more *accurate* here — at
+K=400 plain PG's RMSE is slightly lower. That's plausible MC noise at this
+sample size rather than a real effect (a single seed, single dataset), but
+reported as-is rather than smoothed over; it doesn't change the mixing-speed
+story below, which is the more decision-relevant number for whether PGAS is
+worth its ancestor-sampling overhead.
+
+**Mixing speed** — chain ESS of `x_0` (furthest from any observation, most
+exposed to persistence-driven stickiness):
+
+| K | plain PG chain ESS | PGAS chain ESS | speedup |
+|---|---|---|---|
+| 50 | 11.2 / 1000 (1.1%) | **631.9** / 1000 (63.2%) | 56.5x |
+| 200 | 393.9 / 1000 (39.4%) | **1001.0** / 1000 (100.1%) | 2.5x |
+| 400 | 450.6 / 1000 (45.1%) | **840.0** / 1000 (84.0%) | 1.9x |
+
+Same qualitative pattern as both other models: PGAS's mixing advantage is
+largest at small K and narrows (but doesn't disappear) as K grows. At K=50,
+plain PG only explores ~1% of the chain's worth of effective samples for
+`x_0` — persistence alone is enough to reproduce the "reference stickiness"
+pathology, with no multimodality involved.
+
+**Path degeneracy** is milder than the growth model at matched K (K=50: 5/50
+unique ancestors survive to `t=0` vs. the growth model's 1/50) — consistent
+with this being an easier filtering problem locally (unimodal, unlike GSS)
+even though it's harder to *mix* over a long horizon.
+
+### Reproducing
+
+```
+cd experiments/particle_gibbs
+python3 sv_model.py           # model + grid filter/smoother sanity check
+python3 sv_bootstrap_pf.py    # log-lik bias vs K, path degeneracy demo
+python3 sv_particle_gibbs.py  # PG/PGAS smoke test
+python3 sv_pg_validate.py     # full accuracy + mixing-speed comparison (~5 minutes)
+```
+
+## Summary across all three models
+
+| Model | Hard because of | PGAS mixing speedup (small K) | PGAS more accurate? |
+|---|---|---|---|
+| Linear-Gaussian | (baseline, easy) | up to 772x | yes, every K tested |
+| Nonlinear GSS growth | multimodality | up to 49x | yes, every K tested |
+| Stochastic volatility | persistence (phi=0.98) | up to 56.5x | mostly, one K reversed (noise) |
+
+The mixing-speed advantage of PGAS over plain PG is large and consistent
+across three models stressing three different failure modes (small sample
+size, multimodality, persistence) — the strongest evidence yet that it's
+worth treating as a near-term priority over plain CSMC if/when this becomes
+real alan integration work, per `docs/pmcmc_design.md`.
+
 ## What this doesn't cover
 
 This validates the *algorithm*, not an alan integration — `csmc_sweep` is

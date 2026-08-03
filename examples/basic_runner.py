@@ -1,5 +1,6 @@
 import torch as t
 import importlib.util
+import os
 import sys
 import time
 import alan
@@ -124,6 +125,9 @@ def run(model_name,
 
         import matplotlib.pyplot as plt
 
+        plot_dir = f'../../experiments/plots/{model_name}'
+        os.makedirs(plot_dir, exist_ok=True)
+
         plt.figure()
         for method in methods:
             plt.plot(t.arange(num_iters), elbos[method].mean(0), label=f'{method.upper()} lr={lrs[method]}')
@@ -131,7 +135,7 @@ def run(model_name,
         plt.xlabel('Iteration')
         plt.ylabel('ELBO')
         plt.title(f'{model_name.upper()} ({"FAKE" if fake_data else "REAL"} data)')
-        plt.savefig(f'../../experiments/plots/{model_name}/quick_elbos.png')
+        plt.savefig(f'{plot_dir}/quick_elbos.png')
 
         if do_predll:
             plt.figure()
@@ -141,4 +145,4 @@ def run(model_name,
             plt.xlabel('Iteration')
             plt.ylabel('PredLL')
             plt.title(f'{model_name.upper()} ({"FAKE" if fake_data else "REAL"} data)')
-            plt.savefig(f'../../experiments/plots/{model_name}/quick_predlls.png')
+            plt.savefig(f'{plot_dir}/quick_predlls.png')

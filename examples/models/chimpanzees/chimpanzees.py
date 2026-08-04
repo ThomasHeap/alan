@@ -146,7 +146,7 @@ def _load_and_generate_problem(device, Q_param_type, run=0, data_dir='data/', fa
 
 if __name__ == "__main__":
     import os, sys
-    sys.path.insert(1, os.path.join(sys.path[0], '..'))
+    sys.path.insert(1, os.path.join(sys.path[0], '../..'))
     import basic_runner
 
     basic_runner.run('chimpanzees',

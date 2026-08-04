@@ -178,11 +178,107 @@ def sample_Ks_timeseries(lps, Ks_to_sum, ts_init_Ks, N_dim, num_samples, T_dim, 
             ts_indices[t_idx] = sampled_flat_idx[N_dim]
 
         indices[K_dim] = ts_indices[T_dim] # TODO: try just the final timestep (as we were doing before)
-        
+
     return indices
-    
-    
-    
+
+
+def timeseries_pairwise_marginal(lps, Ks_to_sum, ts_init_Ks, N_dim, T_dim, indices, target_K_dim, i, j):
+    """
+    Computes the pairwise smoothed marginal xi[k_i, k_j] = p(x_i=k_i, x_j=k_j | data)
+    for a Timeseries variable whose K-dimension is target_K_dim, at two (0-indexed)
+    timesteps i < j -- the standard forward-backward pairwise-smoothing formula
+    (Rabiner 1989's xi_t, generalised from adjacent timesteps to arbitrary lags):
+
+        xi(k_i, k_j)  ~  alpha_i(k_i) * Bridge_{i->j}(k_i, k_j) * beta_j(k_j)
+
+    alpha_i is exactly filtered_t at t=i (see sample_Ks_timeseries). beta_j is the
+    backward-only message: since smoothed_t = filtered_t + logsumexp[(smoothed_{t+1}
+    - filtered_{t+1}) + transition], the quantity (smoothed_t - filtered_t) satisfies
+    its own clean recursion, which is what's computed here directly rather than via
+    the full smoothed_t. Bridge_{i->j} is the one piece not otherwise computed: the
+    UNcontracted chain_logmmexp over just the (i, j] sub-range, instead of summed
+    all the way through like the main forward filtering pass.
+
+    Mirrors sample_Ks_timeseries's own preamble (collect_lps, indexing into lps with
+    already-resolved indices, building lp.order(T_dim, init_K_dim, K_dim)) so this
+    uses exactly the same lp construction as alan's own posterior sampling -- any
+    discrepancy against ground truth would reflect the formula, not a mismatch
+    against how alan actually represents the model.
+
+    Unlike a single-timestep marginal (which sample.moments() already computes
+    exactly, with no sampling), this conditions on (and averages over N_dim) the
+    already-resolved indices of anything upstream of this Timeseries (e.g. an
+    `init` variable) -- so it inherits whatever finite-N noise that resolution
+    carries, the same way sample_Ks_timeseries's own filtered_t/smoothed_t do.
+
+    Returns xi as a plain [K, K] tensor (rows = index at i, cols = index at j,
+    normalised to sum to 1), plus the plain [K] alpha_i and lp_ordered used to
+    derive it (callers can reuse lp_ordered for e.g. multiple (i,j) queries against
+    the same sample without rebuilding it).
+    """
+    assert i < j
+    assert_unique_dim_iter(Ks_to_sum)
+    assert set(unify_dims(lps)).issuperset(Ks_to_sum)
+    _, lps_for_sampling, Ks_to_sample = collect_lps(lps, Ks_to_sum)
+
+    for group_lps, kdims_to_sample, init_K_dim in zip(lps_for_sampling[::-1], Ks_to_sample[::-1], ts_init_Ks[::-1]):
+        assert len(kdims_to_sample) == 1
+        K_dim = kdims_to_sample[0]
+        if K_dim is not target_K_dim:
+            continue
+
+        lp = sum(group_lps)
+
+        assert K_dim in set(generic_dims(lp))
+        assert T_dim in set(generic_dims(lp))
+        assert init_K_dim in set(generic_dims(lp))
+        assert init_K_dim in indices.keys()
+
+        # index into lp with already-resolved indices, EXCEPT for this Timeseries's
+        # own init_K_dim, which we condition on/average over explicitly below --
+        # mirrors sample_Ks_timeseries exactly.
+        for dim in list(set(generic_dims(lp)).intersection(set(indices.keys())).difference({init_K_dim})):
+            lp = lp.order(dim)[indices[dim]]
+
+        # From here on, everything is plain PyTorch (no torchdims): lp_ordered[t]
+        # is [K,K] with row=index at t-1 (or init, for t=0) and col=index at t --
+        # this convention is what makes chain_logmmexp correctly chain as ordinary
+        # matrix multiplication, and is all the rest of this function relies on.
+        lp_ordered = lp.order(T_dim, init_K_dim, K_dim)
+        T = lp_ordered.shape[0]
+        assert 0 <= i < j <= T - 1
+
+        # alpha_i: forward-filtered log-mass at i. This is the one place we go back
+        # to torchdim, to condition on/average over the already-resolved init index
+        # exactly as sample_Ks_timeseries's own filtered_t does.
+        cumulative_i = lp_ordered[0]
+        for t_idx in range(1, i + 1):
+            cumulative_i = logmmexp(cumulative_i, lp_ordered[t_idx])
+        alpha_i = cumulative_i[init_K_dim, K_dim]
+        alpha_i = alpha_i.order(init_K_dim)[indices[init_K_dim]]
+        alpha_i = alpha_i.order(N_dim)
+        alpha_i = t.logsumexp(alpha_i, 0).order(K_dim)
+        alpha_i = alpha_i - t.logsumexp(alpha_i, 0)
+
+        # beta_j: backward message, beta_{T-1} = 0 (log-space), plain [K] throughout.
+        K = alpha_i.shape[0]
+        beta = t.zeros(K)
+        for t_idx in range(T - 1, j, -1):
+            beta = t.logsumexp(lp_ordered[t_idx] + beta[None, :], dim=1)
+        beta_j = beta
+
+        # Bridge_{i->j}: uncontracted chain over (i, j], plain [K,K],
+        # row = index at i, col = index at j.
+        bridge = lp_ordered[i + 1]
+        for t_idx in range(i + 2, j + 1):
+            bridge = logmmexp(bridge, lp_ordered[t_idx])
+
+        log_xi = alpha_i[:, None] + bridge + beta_j[None, :]
+        log_xi = log_xi - t.logsumexp(log_xi.reshape(-1), 0)
+        return log_xi.exp(), alpha_i, lp_ordered
+
+    raise Exception(f"No timeseries group found with K-dimension {target_K_dim}")
+
 def reduce_Ks(lps, Ks_to_sum):
     """
     Sum over Ks_to_sum, returning a single tensor.

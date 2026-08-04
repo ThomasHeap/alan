@@ -66,7 +66,7 @@ class Sample():
     def all_platedims(self):
         return self.problem.all_platedims
 
-    def _elbo(self, sample, extra_log_factors, computation_strategy):
+    def _elbo(self, sample, extra_log_factors, computation_strategy, pairwise_query=None, pairwise_result=None):
         if extra_log_factors is None:
             extra_log_factors = {}
 
@@ -103,7 +103,9 @@ class Sample():
             groupvarname2Kdim=self.groupvarname2Kdim,
             varname2groupvarname=self.problem.Q.varname2groupvarname(),
             sampler=self.sampler,
-            computation_strategy=computation_strategy)
+            computation_strategy=computation_strategy,
+            pairwise_query=pairwise_query,
+            pairwise_result=pairwise_result)
 
         return lp
 
@@ -181,6 +183,137 @@ class Sample():
 
         indices = {Kdim2groupvarname[k]: v for (k, v) in indices.items()}
         return indices, N_dim
+
+    def timeseries_pairwise_covariance(self, varname:str, i:int, j:int, N:int=200, computation_strategy=checkpoint):
+        """
+        timeseries_pairwise_covariance(varname, i, j, N=200, computation_strategy=checkpoint)
+
+        Cov(x_i, x_j) between two different (0-indexed) timesteps of the same
+        Timeseries variable -- e.g. `sample.timeseries_pairwise_covariance('ts', 0, 5)`.
+
+        Unlike ``sample.moments``, which gives exact per-timestep marginal moments
+        with no sampling at all, computing a genuine cross-timestep quantity needs
+        to resolve the posterior uncertainty in anything upstream of the Timeseries
+        (e.g. its own initial state) -- ``N`` controls how many such resolutions get
+        averaged over (via the standard forward-backward pairwise-smoothing
+        formula: ``xi(k_i,k_j) ~ alpha_i(k_i) * Bridge_{i->j}(k_i,k_j) * beta_j(k_j)``,
+        see ``reduce_Ks.timeseries_pairwise_marginal``), the same way ordinary
+        posterior sampling (``importance_sample``) does. Larger N reduces that noise;
+        it doesn't need to match the model's own K.
+
+        Arguments:
+            varname (str): name of the Timeseries random variable (not the group name).
+            i, j (int): 0-indexed timesteps, i < j.
+            N (int): number of resolutions of upstream uncertainty to average over.
+
+        Returns a ``(covariance, mean_i, mean_j)`` tuple of plain floats.
+        """
+        if i >= j:
+            raise Exception(f"timeseries_pairwise_covariance requires i < j, but got i={i}, j={j}")
+
+        groupvarname = self.problem.Q.varname2groupvarname()[varname]
+        K_dim = self.groupvarname2Kdim[groupvarname]
+        platenames = self.problem.Q.groupvarname2platenames()[groupvarname]
+        if 0 == len(platenames):
+            raise Exception(f"{varname} doesn't look like a Timeseries variable (no active plate)")
+        T_dim = self.all_platedims[platenames[-1]]
+
+        extra_log_factors = empty_tree(self.P.plate)
+        N_dim = Dim('N', N)
+        pairwise_result = {}
+
+        with t.no_grad():
+            logPQ_sample(
+                name=None,
+                P=self.P.plate,
+                Q=self.Q.plate,
+                sample=self.detached_sample,
+                inputs_params=self.problem.inputs_params(),
+                data=self.problem.data,
+                extra_log_factors=extra_log_factors,
+                scope={},
+                active_platedims=[],
+                all_platedims=self.all_platedims,
+                groupvarname2Kdim=self.groupvarname2Kdim,
+                varname2groupvarname=self.problem.Q.varname2groupvarname(),
+                sampler=self.sampler,
+                computation_strategy=computation_strategy,
+                indices={},
+                num_samples=N,
+                N_dim=N_dim,
+                pairwise_query=(K_dim, i, j),
+                pairwise_result=pairwise_result,
+            )
+
+        if 'xi' not in pairwise_result:
+            raise Exception(f"{varname} isn't a Timeseries variable, or (i, j)=({i}, {j}) is out of range")
+        xi = pairwise_result['xi']  # plain [K, K], rows=index at i, cols=index at j
+
+        sample_tensor = flatten_tree(self.detached_sample)[varname]
+        s = generic_order(sample_tensor, [T_dim, K_dim])
+        s_i, s_j = s[i], s[j]
+
+        mean_i = (xi.sum(1) * s_i).sum()
+        mean_j = (xi.sum(0) * s_j).sum()
+        e_ij = (xi * s_i[:, None] * s_j[None, :]).sum()
+
+        return (e_ij - mean_i * mean_j).item(), mean_i.item(), mean_j.item()
+
+    def timeseries_pairwise_covariance_exact(self, varname:str, i:int, j:int, computation_strategy=checkpoint):
+        """
+        timeseries_pairwise_covariance_exact(varname, i, j, computation_strategy=checkpoint)
+
+        Exact, no-sampling counterpart to ``timeseries_pairwise_covariance``: the same
+        Cov(x_i, x_j) quantity for two (0-indexed) timesteps of the same Timeseries
+        variable, but obtained by inserting a source term into the model's own
+        Bridge_{i->j} term (see ``logpq._timeseries_pairwise_source_term``) and
+        differentiating the resulting scalar ELBO -- the same source-term-trick used
+        by ``sample.moments``/``sample.marginals()`` for ordinary moments and joint
+        marginals (see ``Sample._marginal_idxs``). This exactly marginalizes over any
+        upstream uncertainty (e.g. the Timeseries's own initial state), with no N,
+        no sampling, and no approximation error, unlike ``timeseries_pairwise_covariance``.
+
+        Arguments:
+            varname (str): name of the Timeseries random variable (not the group name).
+            i, j (int): 0-indexed timesteps, i < j.
+
+        Returns a ``(covariance, mean_i, mean_j)`` tuple of plain floats.
+        """
+        if i >= j:
+            raise Exception(f"timeseries_pairwise_covariance_exact requires i < j, but got i={i}, j={j}")
+
+        groupvarname = self.problem.Q.varname2groupvarname()[varname]
+        K_dim = self.groupvarname2Kdim[groupvarname]
+        platenames = self.problem.Q.groupvarname2platenames()[groupvarname]
+        if 0 == len(platenames):
+            raise Exception(f"{varname} doesn't look like a Timeseries variable (no active plate)")
+        T_dim = self.all_platedims[platenames[-1]]
+
+        J = t.zeros(K_dim.size, K_dim.size, device=self.device, requires_grad=True)
+        pairwise_result = {}
+
+        L = self._elbo(
+            self.detached_sample,
+            extra_log_factors=None,
+            computation_strategy=computation_strategy,
+            pairwise_query=(K_dim, i, j, J),
+            pairwise_result=pairwise_result,
+        )
+
+        if not pairwise_result.get('done'):
+            raise Exception(f"{varname} isn't a Timeseries variable, or (i, j)=({i}, {j}) is out of range")
+
+        xi = grad(L, [J])[0]  # plain [K, K], rows=index at i, cols=index at j
+
+        sample_tensor = flatten_tree(self.detached_sample)[varname]
+        s = generic_order(sample_tensor, [T_dim, K_dim])
+        s_i, s_j = s[i], s[j]
+
+        mean_i = (xi.sum(1) * s_i).sum()
+        mean_j = (xi.sum(0) * s_j).sum()
+        e_ij = (xi * s_i[:, None] * s_j[None, :]).sum()
+
+        return (e_ij - mean_i * mean_j).item(), mean_i.item(), mean_j.item()
 
     def importance_sample(self, N:int, computation_strategy=checkpoint):
         """

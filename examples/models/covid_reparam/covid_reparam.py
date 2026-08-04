@@ -147,11 +147,26 @@ def _load_and_generate_problem(device, Q_param_type, run=0, data_dir='data/', fa
 
 if __name__ == "__main__":
     import os, sys
-    sys.path.insert(1, os.path.join(sys.path[0], '..'))
+    sys.path.insert(1, os.path.join(sys.path[0], '../..'))
     import basic_runner
 
+    # RWS is deliberately excluded here (unlike covid.py's demo, which includes
+    # it). RWS's Q-update is a score-function-style, self-normalised-importance-
+    # weighted fit of Q's own raw parameters (elbo_rws() differentiates only
+    # log Q, on a detached sample) -- unlike VI's reparameterisation-trick
+    # gradient, it has no pathwise/chain-rule structure through a change of
+    # variables, so it has no reason to behave consistently across different
+    # parameterisations of the same model. The non-centered parameterisation
+    # here is specifically chosen to help methods that DO have that pathwise
+    # structure (VI, HMC/NUTS); it doesn't transfer to RWS, and empirically
+    # actively hurts it: RWS's gradient norm is already ~8700 at iteration 0
+    # here (vs ~150-300 on the centered covid.py model), and unlike covid.py's
+    # divergence (fixed there via gradient clipping), clipping at very
+    # different thresholds (1.0 vs 10.0) gives near-identical, still-diverging
+    # trajectories -- consistent with a systematically mismatched gradient
+    # scale, not occasional heavy-tailed spikes clipping can catch.
     basic_runner.run('covid_reparam',
-                     methods = ['rws','vi'],
+                     methods = ['vi'],
                      K = 3,
                      num_runs = 1,
                      num_iters = 5,

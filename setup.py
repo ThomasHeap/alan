@@ -22,6 +22,7 @@ setup(
         "numpy",
         "opt_einsum",
         "pytest",
+        "pytest-xdist",
     ],
     extras_requires=[
     ],

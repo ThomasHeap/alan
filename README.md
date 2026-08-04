@@ -18,7 +18,11 @@ pip install -e .
 
 ### Tests
 
-To run tests, navigate to `tests/` and use `pytest`.
+To run tests, navigate to `tests/` and use `pytest`. To run them in parallel
+(CI does this, ~3x faster): `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 pytest -n
+auto` -- the thread pinning matters, since torch's own internal BLAS
+threading otherwise oversubscribes the machine's cores together with
+pytest-xdist's worker processes and makes the run slower, not faster.
 
 ### Docs
 

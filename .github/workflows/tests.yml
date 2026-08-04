@@ -26,4 +26,13 @@ jobs:
 
       - name: Run tests
         working-directory: tests
-        run: pytest -q
+        # -n auto runs test files in parallel across CPU cores via
+        # pytest-xdist. torch's own internal BLAS threading multiplies with
+        # that (N worker processes each ALSO spawning multiple BLAS
+        # threads), oversubscribing the runner's cores and making the whole
+        # run slower than serial, not faster -- OMP/MKL_NUM_THREADS=1 pins
+        # each worker to a single thread so xdist's parallelism is the only
+        # parallelism in play (measured ~3x wall-clock speedup locally: 454s
+        # serial vs 127s parallel-with-pinned-threads, on the same machine
+        # where naive `-n auto` alone was slower than serial at 394s).
+        run: OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 pytest -q -n auto

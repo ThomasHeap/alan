@@ -6,6 +6,7 @@ from .Group import Group
 from .Data import Data
 from .Enumerate import Enumerate
 from .Timeseries import Timeseries
+from .Flow import Flow
 from .dist import Dist, datagroup, enumerategroup
 
 from .utils import *
@@ -334,8 +335,8 @@ def logPQ_gdt(
         dist_Q   = prog_Q[k]
         sample_k = sample[k]
 
-        assert isinstance(dist_P, (Dist, Timeseries))
-        assert isinstance(dist_Q, (Dist, Timeseries))
+        assert isinstance(dist_P, (Dist, Timeseries, Flow))
+        assert isinstance(dist_Q, (Dist, Timeseries, Flow))
         assert isinstance(sample_k, Tensor)
         assert data[k] is None
 

@@ -3,6 +3,12 @@ import torch as t
 from alan import Bernoulli, Beta, Plate, BoundPlate, Group, Problem, Data, mean, mean2, Normal
 from TestProblem import TestProblem
 
+#Fixed seed so this test problem's random data is deterministic across runs
+#(module-level t.randn otherwise depends on whatever global RNG state exists
+#at import time, which varies with test execution order -- e.g. under
+#pytest-xdist).
+t.manual_seed(6)
+
 prior_mean = 2
 a_scale = 1
 b_scale = 1

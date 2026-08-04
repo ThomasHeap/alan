@@ -2,6 +2,12 @@ import torch as t
 from alan import Normal, Plate, BoundPlate, Group, Problem, Data, mean, Split, OptParam, QEMParam
 from TestProblem import TestProblem
 
+#Fixed seed so this test problem's random data is deterministic across runs
+#(module-level t.randn otherwise depends on whatever global RNG state exists
+#at import time, which varies with test execution order -- e.g. under
+#pytest-xdist).
+t.manual_seed(11)
+
 P = Plate(
     a = Normal(0, 1),
     b = Normal("a", 1),

@@ -280,8 +280,8 @@ def test_compstrat_moments(tp_name, compstrat):
         assert t.allclose(base_moments, test_moments, rtol=1E-4, atol=1E-5)
 
 @pytest.mark.parametrize(
-    "tp_name,reparam,sampler,compstrat,device", 
-    itertools.product(tp_names, reparams, samplers, [*compstrats, None], devices)
+    "tp_name,reparam,sampler,compstrat,device",
+    list(itertools.product(tp_names, reparams, samplers, [*compstrats, None], devices))
 )
 def test_device(tp_name, reparam, sampler, compstrat, device):
     """

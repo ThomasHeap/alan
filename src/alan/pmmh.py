@@ -80,8 +80,13 @@ def pmmh(
         burn_in (int):
             number of initial iterations to discard from the returned chain.
         seed (int, optional):
-            seeds a fresh ``torch.Generator`` for reproducibility. If not
-            given, uses the default (global) generator.
+            seeds a fresh ``torch.Generator`` used for proposals and the
+            accept/reject draw, AND calls ``torch.manual_seed(seed)`` for
+            full reproducibility -- ``Problem.sample`` has no generator
+            parameter of its own, so the resampling randomness inside every
+            evidence estimate always comes from the global RNG; a
+            ``theta``-scoped ``Generator`` alone would leave that
+            unreproducible. If not given, both stay unseeded.
         sampler:
             alan ``Sampler`` class used inside ``Problem.sample`` (see
             :mod:`alan.Sampler`).
@@ -92,7 +97,11 @@ def pmmh(
         PMMHResult(chain, accept_rate), where ``chain`` has length
         ``n_iters - burn_in``.
     """
-    g = t.Generator().manual_seed(seed) if seed is not None else t.Generator()
+    if seed is not None:
+        t.manual_seed(seed)
+        g = t.Generator().manual_seed(seed)
+    else:
+        g = t.Generator()
 
     theta = theta_init
     logpost = _log_phat_mp(build_problem, theta, K, sampler, computation_strategy) + log_prior(theta)

@@ -77,6 +77,31 @@ def test_pmmh_matches_closed_form_posterior():
     assert 0.0 < result.accept_rate < 1.0
 
 
+def test_pmmh_seed_is_fully_reproducible():
+    """seed must reproduce the exact chain, not just the proposal/accept-reject
+    draws -- the K-particle resampling inside every evidence estimate comes
+    from the global RNG (Problem.sample has no generator parameter of its
+    own), so `seed` needs to seed that too, or repeated runs would silently
+    diverge despite passing the same seed."""
+    x = _simulate()
+
+    def run():
+        return pmmh(
+            build_problem=lambda mu: _build_problem(mu, x),
+            log_prior=_log_prior,
+            propose=_propose(0.3),
+            theta_init=0.0,
+            n_iters=30,
+            K=20,
+            seed=7,
+        )
+
+    result1 = run()
+    result2 = run()
+    assert result1.chain == result2.chain
+    assert result1.accept_rate == result2.accept_rate
+
+
 def test_pmmh_unbiased_at_low_K():
     """The core pseudo-marginal claim: even a small, noisy K should give an
     unbiased chain, just a slower-mixing one -- not a biased one."""

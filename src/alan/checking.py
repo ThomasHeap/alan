@@ -91,10 +91,11 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
         elif isinstance(dgpt_P, Timeseries):
             timeseries_P = dgpt_P
             timeseries_dist_Q = Q.flat_prog[name]
-            if not isinstance(timeseries_dist_Q, (Dist, Timeseries, Data)):
-                raise Exception(f"{name} in P is a Timeseries, so {name} in Q should be a Timeseries or a Dist, but actually its a {type(timeseries_dist_Q)}.")
-            dist_Q = timeseries_dist_Q.trans if isinstance(timeseries_dist_Q, Timeseries) else timeseries_dist_Q
-            check_support(name, timeseries_P.trans, dist_Q)
+            if not isinstance(timeseries_dist_Q, (Dist, Timeseries, Data, Enumerate)):
+                raise Exception(f"{name} in P is a Timeseries, so {name} in Q should be a Timeseries, Dist, Data or Enumerate, but actually its a {type(timeseries_dist_Q)}.")
+            if not isinstance(timeseries_dist_Q, (Data, Enumerate)):
+                dist_Q = timeseries_dist_Q.trans if isinstance(timeseries_dist_Q, Timeseries) else timeseries_dist_Q
+                check_support(name, timeseries_P.trans, dist_Q)
 
         elif isinstance(dgpt_P, Group):
             groupP = dgpt_P

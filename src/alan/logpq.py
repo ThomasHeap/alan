@@ -292,6 +292,16 @@ def logPQ_gdt(
     #those K=cardinality particles IS the group's contribution; ordinary
     #logsumexp reduction over Kdim (done by the caller, same as any other
     #group) then gives exactly log(sum_x P(x)), with no -log(K)/Q correction.
+    #
+    #If P's counterpart is a Timeseries (Kinit_p is not None), this is
+    #EXACT discrete-state HMM forward filtering: P.log_prob returns the full
+    #[T, Kinit, Kcurr] transition log-probability matrix (via Timeseries's
+    #own relabelling/broadcasting -- nothing special needed here), and the
+    #existing chain_logmmexp + logsumexp reduction (_logPQ_plate's
+    #Timeseries branch) already implements exactly the standard forward
+    #algorithm's alpha_t = alpha_{t-1} @ Transition_t recursion; it just
+    #needed lp to be the exact (un-normalised-by-Q/K) transition matrix
+    #Enumerate produces, same as the non-timeseries case above.
     if enumerategroup(prog_Q):
         assert len(prog_Q) == 1
         k = next(iter(prog_Q))
@@ -301,10 +311,11 @@ def logPQ_gdt(
 
         T_dim = active_platedims[-1] if 1<=len(active_platedims) else None
         lp, Kinit_p = prog_P[k].log_prob(sample[k], scope=scope, T_dim=T_dim, K_dim=Kdim)
-        if Kinit_p is not None:
-            raise Exception("Enumerate doesn't yet support Timeseries variables")
 
-        return lp, (Kdim,), (), ()
+        if Kinit_p is None:
+            return lp, (Kdim,), (), ()
+        else:
+            return lp, (), (Kdim,), (Kinit_p,)
 
     total_logP = 0.
     total_logQ = 0.

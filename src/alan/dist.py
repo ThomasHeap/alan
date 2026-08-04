@@ -44,9 +44,20 @@ def sample_gdt(
     if enumerategroup(prog):
         #No dependence on scope at all: particle i is deterministically
         #category i, for every i in 0..K_dim.size-1 (see Enumerate's docs).
+        #Explicitly broadcast across active_platedims (rather than leaving
+        #them implicit) so this works when P's counterpart is a Timeseries:
+        #Timeseries.log_prob asserts T_dim is explicitly present on the
+        #sample, and the SAME deterministic category-per-particle assignment
+        #at every timestep is exactly what exact (enumerated) discrete-state
+        #HMM filtering needs -- P's own transition structure supplies all
+        #the cross-timestep coupling via chain_logmmexp.
         varname = next(iter(prog.keys()))
         assert isinstance(prog[varname], Enumerate)
-        return {varname: t.arange(K_dim.size, dtype=t.get_default_dtype())[K_dim]}
+        sample = t.arange(K_dim.size, dtype=t.get_default_dtype())[K_dim]
+        if 0 < len(active_platedims):
+            zeros = t.zeros([dim.size for dim in active_platedims])[active_platedims]
+            sample = sample + zeros
+        return {varname: sample}
 
     #All arguments on prog
     set_all_arg_list = set([arg for dist in prog.values() for arg in dist.all_args])

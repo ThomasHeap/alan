@@ -60,9 +60,20 @@ already enough. See `examples/simple_examples/amortized_inference.py`.
   * Enumeration:
     - Done for a single discrete variable per group -- see `Enumerate`
       (`examples/simple_examples/enumerate.py`). Works with moments,
-      marginals, importance_sample, and sample_nonmp. Still to do: Enumerate
-      inside a Group (joint enumeration of multiple discrete variables) or a
-      Timeseries (would give exact HMM-style forward-algorithm filtering).
+      marginals, importance_sample, and sample_nonmp. Also works as a
+      Timeseries variable's Q slot, giving exact discrete-state HMM
+      inference (forward algorithm / forward-backward smoothing) --
+      see `examples/simple_examples/enumerate_timeseries.py`.
+    - Still to do: Enumerate combined with other variables in the same
+      Group. Group's whole point is sharing ONE K-dim across otherwise-
+      independent variables (not cross-producting their supports), so
+      "jointly enumerate multiple discrete variables" doesn't have a
+      natural meaning there. What WOULD fit Group's existing semantics --
+      Enumerate() paired with an ordinarily-sampled Dist that shares its
+      K-index despite being independent of it -- needs the group's log-prob
+      formula split into an exact part (no -log(K)/Q correction) and an
+      ordinary part (needs both), which is unclear enough value for the
+      added complexity that it's deliberately not done.
   * A `Samples` class that aggregates over multiple `Sample` in a memory efficient way.
     - Acts like it contains a list of e.g. 10 `Sample`s, but doesn't actually.
     - Instead, it generates the `Sample`s as necessary by using frozen random seed.

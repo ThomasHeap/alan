@@ -11,6 +11,7 @@ from .Sampler import Sampler
 from .Stores import BufferStore
 from .Param import QEMParam, OptParam, Param
 from .Data import Data
+from .Enumerate import Enumerate
 
 def datagroup(group):
     assert isinstance(group, dict)
@@ -20,9 +21,17 @@ def datagroup(group):
     return hasdata
 
 
+def enumerategroup(group):
+    assert isinstance(group, dict)
+    hasenum = any(isinstance(v, Enumerate) for v in group.values())
+    more_than_one = 2 <= len(group)
+    assert not ((more_than_one) and hasenum)
+    return hasenum
+
+
 def sample_gdt(
         prog:dict,
-        scope: dict[str, Tensor], 
+        scope: dict[str, Tensor],
         active_platedims:list[Dim],
         K_dim: Dim,
         groupvarname2Kdim,
@@ -32,7 +41,23 @@ def sample_gdt(
 
     assert not datagroup(prog)
 
-
+    if enumerategroup(prog):
+        #No dependence on scope at all: particle i is deterministically
+        #category i, for every i in 0..K_dim.size-1 (see Enumerate's docs).
+        #Explicitly broadcast across active_platedims (rather than leaving
+        #them implicit) so this works when P's counterpart is a Timeseries:
+        #Timeseries.log_prob asserts T_dim is explicitly present on the
+        #sample, and the SAME deterministic category-per-particle assignment
+        #at every timestep is exactly what exact (enumerated) discrete-state
+        #HMM filtering needs -- P's own transition structure supplies all
+        #the cross-timestep coupling via chain_logmmexp.
+        varname = next(iter(prog.keys()))
+        assert isinstance(prog[varname], Enumerate)
+        sample = t.arange(K_dim.size, dtype=t.get_default_dtype())[K_dim]
+        if 0 < len(active_platedims):
+            zeros = t.zeros([dim.size for dim in active_platedims])[active_platedims]
+            sample = sample + zeros
+        return {varname: sample}
 
     #All arguments on prog
     set_all_arg_list = set([arg for dist in prog.values() for arg in dist.all_args])

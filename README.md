@@ -26,7 +26,29 @@ To run tests, navigate to `tests/` and use `pytest`.
 
 ### Overall example:
 
-See `examples/example.py`
+See `examples/simple_examples/example.py`
+
+### Amortized (VAE-style) inference:
+
+There's no dedicated API for this -- an ordinary Python-function distribution
+argument that closes over an `nn.Module` and a plain `Q.encoder = encoder`
+attribute assignment (for `Q.parameters()` to pick up its weights) is
+already enough. See `examples/simple_examples/amortized_inference.py`.
+
+### Normalizing flows:
+
+`alan.Flow(base_dist, transforms)` -- a distribution built by pushing a base
+Dist's sample through a chain of invertible `Transform`s (`AffineTransform`,
+`ExpTransform`, `SigmoidTransform`), with log_prob computed exactly via
+change-of-variables. Bypasses `TorchDimDist` entirely (its `arg_constraints`
+mechanism can't represent a transform-based distribution's arguments) rather
+than extending it. Transform/base-distribution parameters are plain
+`nn.Parameter`s, registered the same way as amortized inference (`Q.some_name
+= some_parameter`), not via `OptParam`/`QEMParam`. See
+`examples/simple_examples/flow.py`. Current scope (a first, minimal pass):
+elementwise transforms only; not supported inside a Timeseries or a Group;
+not yet wired into `sample_nonmp`, `importance_sample`, or
+`predictive_ll`/`extend`.
 
 
 
@@ -51,7 +73,22 @@ See `examples/example.py`
   * Friendly error messages:
     - Marginals/moments make sense for variables on different plates if they're in the same heirarchy.
   * Enumeration:
-    - Enumeration is a class in Q (like Data), not P.
+    - Done for a single discrete variable per group -- see `Enumerate`
+      (`examples/simple_examples/enumerate.py`). Works with moments,
+      marginals, importance_sample, and sample_nonmp. Also works as a
+      Timeseries variable's Q slot, giving exact discrete-state HMM
+      inference (forward algorithm / forward-backward smoothing) --
+      see `examples/simple_examples/enumerate_timeseries.py`.
+    - Still to do: Enumerate combined with other variables in the same
+      Group. Group's whole point is sharing ONE K-dim across otherwise-
+      independent variables (not cross-producting their supports), so
+      "jointly enumerate multiple discrete variables" doesn't have a
+      natural meaning there. What WOULD fit Group's existing semantics --
+      Enumerate() paired with an ordinarily-sampled Dist that shares its
+      K-index despite being independent of it -- needs the group's log-prob
+      formula split into an exact part (no -log(K)/Q correction) and an
+      ordinary part (needs both), which is unclear enough value for the
+      added complexity that it's deliberately not done.
   * A `Samples` class that aggregates over multiple `Sample` in a memory efficient way.
     - Acts like it contains a list of e.g. 10 `Sample`s, but doesn't actually.
     - Instead, it generates the `Sample`s as necessary by using frozen random seed.

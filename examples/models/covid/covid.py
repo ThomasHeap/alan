@@ -147,7 +147,7 @@ def _load_and_generate_problem(device, Q_param_type, run=0, data_dir='data/', fa
 
 if __name__ == "__main__":
     import os, sys
-    sys.path.insert(1, os.path.join(sys.path[0], '..'))
+    sys.path.insert(1, os.path.join(sys.path[0], '../..'))
     import basic_runner
 
     basic_runner.run('covid',
@@ -158,4 +158,8 @@ if __name__ == "__main__":
                      lrs = {'vi': 0.1, 'rws': 0.1, 'qem': 0.1},
                      fake_data = False,
                      device = 'cpu',
-                     do_predll=True)
+                     do_predll=True,
+                     # Without this, RWS's ELBO reliably diverges (confirmed: explodes
+                     # past -2*10^8 within 500 iterations) -- see basic_runner.run's
+                     # clip_grad_norm docs.
+                     clip_grad_norm = 10.0)

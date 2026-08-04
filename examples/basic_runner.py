@@ -1,5 +1,6 @@
 import torch as t
 import importlib.util
+import os
 import sys
 import time
 import alan
@@ -28,7 +29,8 @@ def run(model_name,
         dataset_seed = 0,
         data_dir = 'data/',
         device = 'cpu',
-        split = None):
+        split = None,
+        clip_grad_norm = None):
 
     t.manual_seed(0)
     # ensure device is set correctly
@@ -107,6 +109,16 @@ def run(model_name,
 
                 if method not in ['qem', 'global_qem']:
                     (-elbo).backward()
+                    if clip_grad_norm is not None:
+                        # RWS's gradient (score-function-style: it differentiates only
+                        # log Q, weighted by importance weights, since elbo_rws uses a
+                        # detached sample) is prone to occasional heavy-tailed spikes,
+                        # especially at low K on models with wide log-prob dynamic range.
+                        # Unclipped, Adam's momentum can turn one such spike into runaway
+                        # divergence -- confirmed on the covid model (K=3, lr=0.1): RWS's
+                        # ELBO explodes past -2*10^8 within 500 iterations without
+                        # clipping, and stays stable (on par with VI/QEM) with it.
+                        t.nn.utils.clip_grad_norm_(prob.Q.parameters(), clip_grad_norm)
                     opt.step()
                 else:
                     sample.update_qem_params(lrs[method])
@@ -124,6 +136,9 @@ def run(model_name,
 
         import matplotlib.pyplot as plt
 
+        plot_dir = f'../../experiments/plots/{model_name}'
+        os.makedirs(plot_dir, exist_ok=True)
+
         plt.figure()
         for method in methods:
             plt.plot(t.arange(num_iters), elbos[method].mean(0), label=f'{method.upper()} lr={lrs[method]}')
@@ -131,7 +146,7 @@ def run(model_name,
         plt.xlabel('Iteration')
         plt.ylabel('ELBO')
         plt.title(f'{model_name.upper()} ({"FAKE" if fake_data else "REAL"} data)')
-        plt.savefig(f'../../experiments/plots/{model_name}/quick_elbos.png')
+        plt.savefig(f'{plot_dir}/quick_elbos.png')
 
         if do_predll:
             plt.figure()
@@ -141,4 +156,4 @@ def run(model_name,
             plt.xlabel('Iteration')
             plt.ylabel('PredLL')
             plt.title(f'{model_name.upper()} ({"FAKE" if fake_data else "REAL"} data)')
-            plt.savefig(f'../../experiments/plots/{model_name}/quick_predlls.png')
+            plt.savefig(f'{plot_dir}/quick_predlls.png')

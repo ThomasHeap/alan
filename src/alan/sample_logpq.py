@@ -5,7 +5,7 @@ from .Plate import Plate, tree_values, update_scope
 from .BoundPlate import BoundPlate
 from .Group import Group
 from .utils import *
-from .reduce_Ks import reduce_Ks, sample_Ks, sample_Ks_timeseries
+from .reduce_Ks import reduce_Ks, sample_Ks, sample_Ks_timeseries, timeseries_pairwise_marginal
 from .Split import Split
 from .Sampler import Sampler
 from .dist import Dist
@@ -16,13 +16,13 @@ PBP = Union[Plate, BoundPlate]
 
 def logPQ_sample(
     name:Optional[str],
-    P: Plate, 
-    Q: Plate, 
-    sample: dict, 
+    P: Plate,
+    Q: Plate,
+    sample: dict,
     inputs_params: dict,
     data: dict,
-    extra_log_factors: dict, 
-    scope: dict[str, Tensor], 
+    extra_log_factors: dict,
+    scope: dict[str, Tensor],
     active_platedims:list[Dim],
     all_platedims:dict[str: Dim],
     groupvarname2Kdim:dict[str, Tensor],
@@ -31,7 +31,19 @@ def logPQ_sample(
     computation_strategy:Optional[Split],
     indices:dict[str, Tensor],
     N_dim:Dim,
-    num_samples:int):
+    num_samples:int,
+    pairwise_query=None,
+    pairwise_result=None):
+    """
+    pairwise_query, pairwise_result: optional hook used by
+    Sample.timeseries_pairwise_covariance to compute a cross-timestep joint
+    moment for a Timeseries variable, without duplicating this function's
+    recursive descent to find the right Plate/lps. pairwise_query is
+    (target_K_dim, i, j); when set, and this call reaches the Timeseries
+    group with that K-dimension, the result is written into
+    pairwise_result['xi'] (a plain dict passed in by the caller). No effect
+    on the ordinary sampling path -- both default to None.
+    """
 
     assert isinstance(P, Plate)
     assert isinstance(Q, Plate)
@@ -66,10 +78,21 @@ def logPQ_sample(
         sampler=sampler,
         computation_strategy=computation_strategy)
     
-    # sample timeseries Ks before indexing into the lps so that we can access all ts_init_Ks 
+    # sample timeseries Ks before indexing into the lps so that we can access all ts_init_Ks
     if len(ts_Ks) > 0:
+        if pairwise_query is not None and pairwise_result.get('xi') is None:
+            pw_K_dim, pw_i, pw_j = pairwise_query
+            if pw_K_dim in ts_Ks:
+                #Use the indices resolved so far (i.e. before this group's own
+                #contribution below), matching sample_Ks_timeseries's own inputs.
+                xi, alpha_i, lp_ordered = timeseries_pairwise_marginal(
+                    lps, ts_Ks, ts_init_Ks, N_dim, all_platedims[name], indices, pw_K_dim, pw_i, pw_j)
+                pairwise_result['xi'] = xi
+                pairwise_result['alpha_i'] = alpha_i
+                pairwise_result['lp_ordered'] = lp_ordered
+
         #need a new version of the function here
-        indices = {**indices, **sample_Ks_timeseries(lps, ts_Ks, ts_init_Ks, N_dim, num_samples, all_platedims[name], indices)}        
+        indices = {**indices, **sample_Ks_timeseries(lps, ts_Ks, ts_init_Ks, N_dim, num_samples, all_platedims[name], indices)}
 
     # Index into each lp with the indices we've collected so far
     for i in range(len(lps)):
@@ -101,7 +124,9 @@ def logPQ_sample(
                 computation_strategy=computation_strategy,
                 indices=indices,
                 num_samples=num_samples,
-                N_dim = N_dim
+                N_dim = N_dim,
+                pairwise_query=pairwise_query,
+                pairwise_result=pairwise_result,
             )
 
     return indices

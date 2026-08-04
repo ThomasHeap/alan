@@ -14,6 +14,22 @@ The one sharp edge: the encoder's gradients compute whether or not you do
 that assignment. Forgetting it doesn't error -- it just silently means the
 optimizer never sees (and so never trains) the encoder. If a fit encoder
 seems stuck at its random initialization, check this first.
+
+A second sharp edge: `x` inside the lambda is a functorch.dim tensor, not a
+plain torch.Tensor (alan converts inputs to dim tensors before they hit
+scope). Elementwise ops and plain nn.Linear/nn.Sequential work fine here --
+functorch.dim's operator dispatch handles them transparently -- but this
+was only verified against the currently-pinned torch version (see setup.py).
+Ops that inspect `.shape`/`.view()`/`.reshape()` directly do NOT work as-is:
+a plate dimension isn't an ordinary positional axis, so e.g. `x.shape[0]`
+silently reads the wrong axis. If you need that inside a custom module,
+materialize the dims first and rewrap after:
+
+    def forward(self, x):
+        dims = x.dims                 # torchdims present, e.g. (plate_1,)
+        x = x.order(*dims)            # ordinary positional tensor now
+        ...                           # any shape-based ops are safe here
+        return out[dims]              # rewrap the same leading dims
 """
 import torch as t
 import torch.nn as nn

@@ -19,6 +19,14 @@ Ground truth: a linear-Gaussian VAE (fixed, known W, c, sigma), for which the
 true amortized posterior q(z_m | x_m) is EXACTLY affine in x_m -- so a bare
 nn.Linear encoder is the exactly-correct family, and training via ordinary
 reparameterised VI should recover the closed-form affine map.
+
+Only plain nn.Linear is exercised here. `x` inside the encoder lambda is
+actually a functorch.dim tensor, not a plain torch.Tensor -- elementwise ops
+and nn.Linear/nn.Sequential work via functorch.dim's operator dispatch, but
+anything using `.shape`/`.view()`/`.reshape()` directly does not, since a
+plate dimension isn't an ordinary positional axis there. See
+examples/simple_examples/amortized_inference.py's docstring for the
+workaround (`x.order(*x.dims)` / rewrap with `[dims]`), if you need that.
 """
 import torch as t
 import torch.nn as nn

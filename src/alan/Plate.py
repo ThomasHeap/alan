@@ -250,9 +250,9 @@ class Plate():
         result = {}
         for k, v in self.grouped_prog.items():
             if isinstance(v, dict):
-                if not datagroup(v) and not enumerategroup(v):
+                if not datagroup(v):
                     for gk, gv in v.items():
-                        assert isinstance(gv, (Dist, Timeseries))
+                        assert isinstance(gv, (Dist, Timeseries, Enumerate))
                         result[gk] = (k, gv)
             else:
                 assert isinstance(v, Plate)

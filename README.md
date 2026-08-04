@@ -59,9 +59,9 @@ already enough. See `examples/simple_examples/amortized_inference.py`.
     - Marginals/moments make sense for variables on different plates if they're in the same heirarchy.
   * Enumeration:
     - Done for a single discrete variable per group -- see `Enumerate`
-      (`examples/simple_examples/enumerate.py`). Still to do: Enumerate
-      inside a Group/Timeseries, and support in `sample_nonmp`/posterior
-      sampling (`importance_sample`, `marginals`).
+      (`examples/simple_examples/enumerate.py`). Works with moments,
+      marginals, and importance_sample. Still to do: Enumerate inside a
+      Group/Timeseries, and support in `sample_nonmp`.
   * A `Samples` class that aggregates over multiple `Sample` in a memory efficient way.
     - Acts like it contains a list of e.g. 10 `Sample`s, but doesn't actually.
     - Instead, it generates the `Sample`s as necessary by using frozen random seed.

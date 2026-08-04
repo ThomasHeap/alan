@@ -1,4 +1,6 @@
-class Enumerate():
+import torch.nn as nn
+
+class Enumerate(nn.Module):
     """
     alan.Enumerate()
 
@@ -30,6 +32,12 @@ class Enumerate():
     log(sum_x P(x)), with zero variance.
 
     Current scope: a single Enumerate() variable per group (not combined
-    with other variables), not inside a Timeseries, and only supported by
-    the massively-parallel (Problem.sample) path -- not sample_nonmp.
+    with other variables), not inside a Timeseries or a Group, and only
+    supported by the massively-parallel (Problem.sample) path -- not
+    sample_nonmp (fails with a clear AssertionError). Everything built on
+    Sample's shared reduction machinery works correctly for an enumerated
+    variable, including joint queries with other variables:
+    elbo_vi/elbo_rws/elbo_nograd, sample.moments(...), sample.marginals(),
+    and sample.importance_sample(...) (validated: draws land within Monte
+    Carlo noise of the true posterior).
     """

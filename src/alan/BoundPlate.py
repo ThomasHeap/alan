@@ -9,6 +9,7 @@ from .moments import moments_func2name
 from .Param import OptParam, QEMParam
 from .conversions import conversion_dict
 from .Timeseries import Timeseries
+from .Enumerate import Enumerate
 
 def named2torchdim_flat2tree(flat_named:dict, all_platedims, plate):
     flat_torchdim = named2dim_dict(flat_named, all_platedims)
@@ -98,6 +99,10 @@ class BoundPlate(nn.Module):
         groupvarname2platenames = self.plate.groupvarname2platenames()
         varname2groupvarname_dist = self.plate.varname2groupvarname_dist()
         for varname, (groupvarname, dist) in varname2groupvarname_dist.items():
+            if isinstance(dist, Enumerate):
+                #Enumerate has no args of its own -- Q isn't used at all for
+                #an enumerated variable, so there's nothing to check here.
+                continue
             for argname in dist.all_args:
                 if argname in inputs_extra_opt_params:
                     dist_platenames = groupvarname2platenames[groupvarname]
@@ -136,6 +141,11 @@ class BoundPlate(nn.Module):
 
 
         for varname, (groupvarname, dist) in varname2groupvarname_dist.items():
+            if isinstance(dist, Enumerate):
+                #Enumerate has no params (OptParam/QEMParam) of its own to
+                #register -- Q isn't used at all for an enumerated variable.
+                continue
+
             platenames = groupvarname2platenames[groupvarname]
 
             if not dist.qem_dist:

@@ -2,6 +2,16 @@ import torch as t
 from alan import Bernoulli, Beta, Plate, BoundPlate, Group, Problem, Data, mean, mean2, MultivariateNormal
 from TestProblem import TestProblem
 
+#Fixed seed so this test problem's random model (including Q's proposal
+#covariance ap_cov, generated the same random way as the true posterior
+#covariance) is deterministic across runs -- unseeded, an unlucky draw could
+#make ap_cov a poor match for the true posterior, inflating importance-
+#sampling variance well past what the test's fixed sigma margins assume.
+#Module-level t.randn otherwise depends on whatever global RNG state exists
+#at import time, which varies with test execution order -- e.g. under
+#pytest-xdist.
+t.manual_seed(8)
+
 F = 2
 prior_mean = t.randn(F)
 A = t.randn(F, F)

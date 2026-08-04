@@ -9,7 +9,7 @@ import math
 import torch as t
 import torch.nn.functional as F
 
-from alan import Normal, Bernoulli, Categorical, Plate, BoundPlate, Problem, Data, Enumerate, mean, mean2
+from alan import Normal, Bernoulli, Categorical, Plate, BoundPlate, Problem, Data, Enumerate, OptParam, mean, mean2
 
 
 def _normal_pdf(x, mu, sigma):
@@ -116,6 +116,67 @@ def test_enumerate_moments_marginals_importance_sample_match_closed_form():
     empirical_mean = imp.dump()['z'].mean().item()
     std_err = (true_post_var / 5000) ** 0.5
     assert abs(empirical_mean - true_post_mean) < 5 * std_err
+
+
+def test_enumerate_sample_nonmp_matches_closed_form():
+    """sample_nonmp uses a single global K-dim shared across ALL latents
+    (unlike the massively-parallel path's one-Kdim-per-group), and applies
+    one blanket -log(K) correction to the whole joint sample -- appropriate
+    for ordinary K-sample importance averaging, but wrong for an exactly
+    enumerated variable, which needs no such correction. Confirms the
+    Enumerate branch's +log(K) cancellation fixes this."""
+    p_true, mu0, mu1, sigma, obs_val = 0.3, -2.0, 3.0, 1.0, 1.0
+
+    P = Plate(z=Bernoulli(p_true), obs=Normal(lambda z: z * mu1 + (1 - z) * mu0, sigma))
+    P = BoundPlate(P, {})
+    Q = Plate(z=Enumerate(), obs=Data())
+    Q = BoundPlate(Q, {})
+    prob = Problem(P, Q, {'obs': t.tensor(obs_val)})
+
+    true_marginal = (1 - p_true) * _normal_pdf(obs_val, mu0, sigma) + p_true * _normal_pdf(obs_val, mu1, sigma)
+
+    for elbo in [
+        prob.sample_nonmp(2, True).elbo_vi(),
+        prob.sample_nonmp(2, False).elbo_nograd(),
+        prob.sample_nonmp(2, False).elbo_rws(),
+    ]:
+        assert abs(elbo.item() - math.log(true_marginal)) < 1e-4
+
+
+def test_enumerate_sample_nonmp_unbiased_with_other_latent():
+    """Mixed case: an enumerated Bernoulli z AND an ordinarily K-sampled
+    continuous latent w in the same model, sharing sample_nonmp's single
+    global K-dim. elbo_nograd is a lower bound on log Z (Jensen's gap), not
+    an unbiased estimator of it -- so the right statistical check is that
+    exp(elbo) is unbiased for the raw marginal likelihood Z, matching
+    ordinary IWAE-style unbiasedness."""
+    p_true, mu0, mu1, tau, sigma, obs_val = 0.4, -1.0, 2.0, 1.5, 0.7, 0.5
+
+    P = Plate(
+        z=Bernoulli(p_true),
+        w=Normal(lambda z: z * mu1 + (1 - z) * mu0, tau),
+        obs=Normal('w', sigma),
+    )
+    P = BoundPlate(P, {})
+    Q = Plate(
+        z=Enumerate(),
+        w=Normal(OptParam(0.), OptParam(1., transformation=t.exp)),
+        obs=Data(),
+    )
+    Q = BoundPlate(Q, {})
+    prob = Problem(P, Q, {'obs': t.tensor(obs_val)})
+
+    combined_sigma = math.sqrt(tau ** 2 + sigma ** 2)
+    true_marginal = (
+        (1 - p_true) * _normal_pdf(obs_val, mu0, combined_sigma)
+        + p_true * _normal_pdf(obs_val, mu1, combined_sigma)
+    )
+
+    t.manual_seed(0)
+    n_reps = 3000
+    Z_ests = t.tensor([prob.sample_nonmp(2, False).elbo_nograd().exp().item() for _ in range(n_reps)])
+    mean_Z, se_Z = Z_ests.mean().item(), Z_ests.std().item() / (n_reps ** 0.5)
+    assert abs(mean_Z - true_marginal) < 4 * se_Z
 
 
 def test_enumerate_rejects_wrong_K():

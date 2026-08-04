@@ -3,6 +3,7 @@ from .utils import *
 from .moments import RawMoment, torchdim_moments_mixin, named_moments_mixin
 
 from .Data import Data
+from .Enumerate import Enumerate
 from .dist import Dist
 from .Plate import Plate, tensordict2tree, flatten_tree
 from .Timeseries import Timeseries
@@ -188,6 +189,30 @@ def non_mp_log_prob(
             lpq, _ = distP.log_prob(data[k], scope=scope, T_dim=None, K_dim=Kdim)
             assert set(generic_dims(lpq)) == set_expected_dims
             lpq = sum_dims(lpq, active_platedims)
+        elif isinstance(distQ, Enumerate):
+            #Exact marginalisation (see Enumerate's docs): Q isn't consulted
+            #at all, sample[k] already holds the deterministic
+            #particle-i-is-category-i assignment Plate.sample built (via the
+            #same sample_gdt this shares with the massively-parallel path).
+            #
+            #_elbo (below) applies a SINGLE blanket "- log(Kdim.size)" to the
+            #whole joint sample, appropriate for ordinary K-sample importance
+            #averaging over K i.i.d. joint draws -- but an exactly-enumerated
+            #variable needs no such correction (there's no average being
+            #taken over it, only an exact sum). Adding + log(Kdim.size) here
+            #exactly cancels that later division, and does so correctly even
+            #when other latents in the same model genuinely need it: for
+            #those, E[P(other_k|z=k)/Q(other_k)] = 1 (an unbiased single-
+            #sample importance estimate of a variable that IS exactly
+            #integrated out), so E[sum_k P(z=k) * P(other_k|z=k)/Q(other_k)]
+            #= sum_k P(z=k) = sum_z P(z) = the true marginal over everything.
+            assert isinstance(distP, Dist)
+            assert k in sample
+            assert k not in data
+
+            lpq, _ = distP.log_prob(sample[k], scope=scope, T_dim=None, K_dim=Kdim)
+            assert set(generic_dims(lpq)) == set_expected_dims
+            lpq = sum_dims(lpq, active_platedims) + math.log(Kdim.size)
         else:
             assert isinstance(distQ, Dist)
             assert k in sample

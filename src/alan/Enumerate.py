@@ -32,12 +32,11 @@ class Enumerate(nn.Module):
     log(sum_x P(x)), with zero variance.
 
     Current scope: a single Enumerate() variable per group (not combined
-    with other variables), not inside a Timeseries or a Group, and only
-    supported by the massively-parallel (Problem.sample) path -- not
-    sample_nonmp (fails with a clear AssertionError). Everything built on
-    Sample's shared reduction machinery works correctly for an enumerated
-    variable, including joint queries with other variables:
-    elbo_vi/elbo_rws/elbo_nograd, sample.moments(...), sample.marginals(),
-    and sample.importance_sample(...) (validated: draws land within Monte
-    Carlo noise of the true posterior).
+    with other variables), not inside a Timeseries or a Group. Supported by
+    both Problem.sample (elbo_vi/elbo_rws/elbo_nograd, sample.moments(...),
+    sample.marginals(), sample.importance_sample(...) -- all validated
+    against closed-form/statistical ground truth, including joint queries
+    with other variables) and Problem.sample_nonmp (elbo_vi/elbo_rws/
+    elbo_nograd; validated including the mixed case of an enumerated
+    variable alongside an ordinarily K-sampled one in the same model).
     """

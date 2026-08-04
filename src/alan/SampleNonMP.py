@@ -4,6 +4,7 @@ from .moments import RawMoment, torchdim_moments_mixin, named_moments_mixin
 
 from .Data import Data
 from .Enumerate import Enumerate
+from .Flow import Flow
 from .dist import Dist
 from .Plate import Plate, tensordict2tree, flatten_tree
 from .Timeseries import Timeseries
@@ -182,7 +183,7 @@ def non_mp_log_prob(
             )
             assert set(generic_dims(lpq)) == set([Kdim])
         elif isinstance(distQ, Data):
-            assert isinstance(distP, Dist)
+            assert isinstance(distP, (Dist, Flow))
             assert k in data
             assert k not in sample
 
@@ -206,7 +207,7 @@ def non_mp_log_prob(
             #sample importance estimate of a variable that IS exactly
             #integrated out), so E[sum_k P(z=k) * P(other_k|z=k)/Q(other_k)]
             #= sum_k P(z=k) = sum_z P(z) = the true marginal over everything.
-            assert isinstance(distP, Dist)
+            assert isinstance(distP, (Dist, Flow))
             assert k in sample
             assert k not in data
 
@@ -214,7 +215,8 @@ def non_mp_log_prob(
             assert set(generic_dims(lpq)) == set_expected_dims
             lpq = sum_dims(lpq, active_platedims) + math.log(Kdim.size)
         else:
-            assert isinstance(distQ, Dist)
+            assert isinstance(distQ, (Dist, Flow))
+            assert isinstance(distP, (Dist, Flow))
             assert k in sample
             assert k not in data
 

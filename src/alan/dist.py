@@ -11,6 +11,7 @@ from .Sampler import Sampler
 from .Stores import BufferStore
 from .Param import QEMParam, OptParam, Param
 from .Data import Data
+from .Enumerate import Enumerate
 
 def datagroup(group):
     assert isinstance(group, dict)
@@ -20,9 +21,17 @@ def datagroup(group):
     return hasdata
 
 
+def enumerategroup(group):
+    assert isinstance(group, dict)
+    hasenum = any(isinstance(v, Enumerate) for v in group.values())
+    more_than_one = 2 <= len(group)
+    assert not ((more_than_one) and hasenum)
+    return hasenum
+
+
 def sample_gdt(
         prog:dict,
-        scope: dict[str, Tensor], 
+        scope: dict[str, Tensor],
         active_platedims:list[Dim],
         K_dim: Dim,
         groupvarname2Kdim,
@@ -32,7 +41,12 @@ def sample_gdt(
 
     assert not datagroup(prog)
 
-
+    if enumerategroup(prog):
+        #No dependence on scope at all: particle i is deterministically
+        #category i, for every i in 0..K_dim.size-1 (see Enumerate's docs).
+        varname = next(iter(prog.keys()))
+        assert isinstance(prog[varname], Enumerate)
+        return {varname: t.arange(K_dim.size, dtype=t.get_default_dtype())[K_dim]}
 
     #All arguments on prog
     set_all_arg_list = set([arg for dist in prog.values() for arg in dist.all_args])

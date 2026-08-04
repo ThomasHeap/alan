@@ -6,6 +6,7 @@ from .BoundPlate import BoundPlate
 from .Group import Group
 from .dist import Dist
 from .Data import Data
+from .Enumerate import Enumerate
 from .Timeseries import Timeseries
 
 
@@ -82,8 +83,8 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
         if isinstance(dgpt_P, Dist):
             distP = dgpt_P
             distQ = Q.flat_prog[name]
-            if not isinstance(distQ, (Dist, Data)):
-                raise Exception(f"{name} in P is a Dist, so {name} in Q should be a Data/Dist, but actually its a {type(distQ)}.")
+            if not isinstance(distQ, (Dist, Data, Enumerate)):
+                raise Exception(f"{name} in P is a Dist, so {name} in Q should be a Data/Dist/Enumerate, but actually its a {type(distQ)}.")
             if isinstance(distQ, Dist):
                 check_support(name, distP, distQ)
 
@@ -111,5 +112,7 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
             check_PQ_plate(name, plateP, plateQ, data[name])
         elif isinstance(dgpt_P, Data):
             raise Exception(f"{name} in P is Data.  But we can't have Data in P.")
+        elif isinstance(dgpt_P, Enumerate):
+            raise Exception(f"{name} in P is Enumerate.  But we can't have Enumerate in P.")
         else:
-            raise Exception(f"{name} is an unrecognised type (should be Plate, Group, Dist or Data (but can only be data in Q))")
+            raise Exception(f"{name} is an unrecognised type (should be Plate, Group, Dist, Data or Enumerate (but Data/Enumerate can only appear in Q))")

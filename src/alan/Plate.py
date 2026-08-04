@@ -8,7 +8,8 @@ from .Sampler import Sampler
 from .dist import Dist
 from .Group import Group
 from .Data import Data
-from .dist import Dist, _Dist, sample_gdt, datagroup
+from .Enumerate import Enumerate
+from .dist import Dist, _Dist, sample_gdt, datagroup, enumerategroup
 from .Timeseries import Timeseries
 
 
@@ -59,7 +60,7 @@ class Plate():
                 self.grouped_prog[k] = v
                 self.flat_prog[k] = v
             else:
-                assert isinstance(v, (Group, Dist, Timeseries, Data))
+                assert isinstance(v, (Group, Dist, Timeseries, Data, Enumerate))
 
                 if isinstance(v, Group):
                     group = v.prog
@@ -249,7 +250,7 @@ class Plate():
         result = {}
         for k, v in self.grouped_prog.items():
             if isinstance(v, dict):
-                if not datagroup(v):
+                if not datagroup(v) and not enumerategroup(v):
                     for gk, gv in v.items():
                         assert isinstance(gv, (Dist, Timeseries))
                         result[gk] = (k, gv)
@@ -290,7 +291,7 @@ class Plate():
             if isinstance(dgpt, Plate):
                 result = [*result, *dgpt.all_platenames()]
             else:
-                assert isinstance(dgpt, (Dist, Data, Timeseries))
+                assert isinstance(dgpt, (Dist, Data, Timeseries, Enumerate))
         return result
 
 

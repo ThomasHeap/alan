@@ -4,8 +4,9 @@ from typing import Optional, Union
 from .Plate import Plate, tree_values, update_scope
 from .Group import Group
 from .Data import Data
+from .Enumerate import Enumerate
 from .Timeseries import Timeseries
-from .dist import Dist, datagroup
+from .dist import Dist, datagroup, enumerategroup
 
 from .utils import *
 from .reduce_Ks import reduce_Ks
@@ -284,6 +285,27 @@ def logPQ_gdt(
         return lp, (), (), ()
 
     Kdim = groupvarname2Kdim[name]
+
+    #Exact marginalisation via enumeration (see Enumerate's docs): Q is
+    #never consulted -- sample[k] already holds the deterministic
+    #particle-i-is-category-i assignment sample_gdt built. P's log-prob at
+    #those K=cardinality particles IS the group's contribution; ordinary
+    #logsumexp reduction over Kdim (done by the caller, same as any other
+    #group) then gives exactly log(sum_x P(x)), with no -log(K)/Q correction.
+    if enumerategroup(prog_Q):
+        assert len(prog_Q) == 1
+        k = next(iter(prog_Q))
+
+        assert isinstance(prog_Q[k], Enumerate)
+        assert isinstance(sample[k], Tensor)
+
+        T_dim = active_platedims[-1] if 1<=len(active_platedims) else None
+        lp, Kinit_p = prog_P[k].log_prob(sample[k], scope=scope, T_dim=T_dim, K_dim=Kdim)
+        if Kinit_p is not None:
+            raise Exception("Enumerate doesn't yet support Timeseries variables")
+
+        return lp, (Kdim,), (), ()
+
     total_logP = 0.
     total_logQ = 0.
 

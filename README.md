@@ -45,10 +45,16 @@ mechanism can't represent a transform-based distribution's arguments) rather
 than extending it. Transform/base-distribution parameters are plain
 `nn.Parameter`s, registered the same way as amortized inference (`Q.some_name
 = some_parameter`), not via `OptParam`/`QEMParam`. See
-`examples/simple_examples/flow.py`. Current scope (a first, minimal pass):
-elementwise transforms only; not supported inside a Timeseries or a Group;
-not yet wired into `sample_nonmp`, `importance_sample`, or
-`predictive_ll`/`extend`.
+`examples/simple_examples/flow.py`. Works through every path that consumes an
+ordinary Dist -- `elbo_vi`/`elbo_rws` (both massively-parallel and
+`sample_nonmp`), `sample.moments`, `sample.importance_sample`, and
+`ImportanceSample.extend`/`predictive_ll`. Current scope (a first, minimal
+pass): elementwise transforms only; not supported inside a Timeseries or a
+Group. (`extend`/`predictive_ll` also have a separate, pre-existing
+limitation unrelated to Flow: they don't handle a bare, top-level scalar
+`Data()` observation with no enclosing Plate -- confirmed identically
+reproducible with an ordinary, Flow-free `Dist`; works fine for a `Data()`
+observation living inside a Plate, the realistic case.)
 
 
 

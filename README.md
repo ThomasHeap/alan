@@ -26,7 +26,14 @@ To run tests, navigate to `tests/` and use `pytest`.
 
 ### Overall example:
 
-See `examples/example.py`
+See `examples/simple_examples/example.py`
+
+### Amortized (VAE-style) inference:
+
+There's no dedicated API for this -- an ordinary Python-function distribution
+argument that closes over an `nn.Module` and a plain `Q.encoder = encoder`
+attribute assignment (for `Q.parameters()` to pick up its weights) is
+already enough. See `examples/simple_examples/amortized_inference.py`.
 
 
 

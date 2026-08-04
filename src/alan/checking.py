@@ -8,6 +8,7 @@ from .dist import Dist
 from .Data import Data
 from .Enumerate import Enumerate
 from .Timeseries import Timeseries
+from .Flow import Flow
 
 
 
@@ -78,15 +79,24 @@ def check_PQ_plate(platename: Optional[str], P: Plate, Q: Plate, data: dict):
         BnotA_msg=f"present in the data dict provided to Problem, but not given as `=Data()` in Q",
     )
 
-    #Now check names in Q 
+    #Now check names in Q
     for name, dgpt_P in P.flat_prog.items():
         if isinstance(dgpt_P, Dist):
             distP = dgpt_P
             distQ = Q.flat_prog[name]
-            if not isinstance(distQ, (Dist, Data, Enumerate)):
-                raise Exception(f"{name} in P is a Dist, so {name} in Q should be a Data/Dist/Enumerate, but actually its a {type(distQ)}.")
+            if not isinstance(distQ, (Dist, Data, Enumerate, Flow)):
+                raise Exception(f"{name} in P is a Dist, so {name} in Q should be a Data/Dist/Enumerate/Flow, but actually its a {type(distQ)}.")
             if isinstance(distQ, Dist):
                 check_support(name, distP, distQ)
+            #No support check for Flow: a transform can change the support
+            #(e.g. ExpTransform maps the real line to the positive reals),
+            #so P/Q support mismatches aren't automatically caught here.
+
+        elif isinstance(dgpt_P, Flow):
+            #Flow doesn't have .dist/.support, so no automated support check
+            #here either -- same reasoning as the Dist branch above.
+            if not isinstance(Q.flat_prog[name], (Dist, Data, Enumerate, Flow)):
+                raise Exception(f"{name} in P is a Flow, so {name} in Q should be a Data/Dist/Enumerate/Flow, but actually its a {type(Q.flat_prog[name])}.")
 
         elif isinstance(dgpt_P, Timeseries):
             timeseries_P = dgpt_P
